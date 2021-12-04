@@ -62,16 +62,16 @@ class qGPS(nn.Module):
 
         transformed_samples = self.apply_symmetries(self.to_indices(inputs))
 
-        range_ids = jnp.arange(transformed_samples.shape[-2])
-
-        # this is a strange way of computing the site product (but we do want some memory efficiency here)
+        # TODO: maybe this can be improved
         def site_prod(indices, epsilon):
-            return epsilon[indices,:,range_ids].prod(axis=0)
+            return jnp.take_along_axis(epsilon, indices, axis=0).prod(axis=-1).reshape(-1)
+
         batched = jax.vmap(site_prod, (0, None), 0)
         if len(inputs.shape) == 3:
             batched = jax.vmap(batched, (0, None), 0)
         batched = jax.vmap(batched, (-1, None), -1)
 
+        transformed_samples = jnp.expand_dims(transformed_samples, (-4, -3))
         support_dim_prod = batched(transformed_samples, epsilon)
 
         qGPS_out = self.before_sym_op(support_dim_prod.sum(axis=-2))
