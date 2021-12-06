@@ -67,8 +67,6 @@ class qGPS(nn.Module):
             return jnp.take_along_axis(epsilon, indices, axis=0).prod(axis=-1).reshape(-1)
 
         batched = jax.vmap(site_prod, (0, None), 0)
-        if len(inputs.shape) == 3:
-            batched = jax.vmap(batched, (0, None), 0)
         batched = jax.vmap(batched, (-1, None), -1)
 
         transformed_samples = jnp.expand_dims(transformed_samples, (-4, -3))
