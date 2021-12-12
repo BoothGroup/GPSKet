@@ -1,0 +1,1 @@
+from .J1J2 import get_J1_J2_Hamiltonian

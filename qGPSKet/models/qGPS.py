@@ -5,19 +5,8 @@ import flax.linen as nn
 from netket.utils import HashableArray
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from typing import Tuple, Union
+from qGPSKet.nn.initializers import normal
 
-
-# default initializer
-def qGPS_init(sigma=1.e-1, dtype=complex):
-    if dtype is complex:
-        def init_fun(key, shape, dtype=dtype):
-            phases = sigma * jax.random.normal(key, shape, float) *1.j
-            return jnp.exp(phases).astype(dtype)
-    else:
-        def init_fun(key, shape, dtype=dtype):
-            var = 1. + sigma * jax.random.normal(key, shape, dtype)
-            return var
-    return init_fun
 
 # helper function to get the symmetry transformation functions for spin systems
 def get_sym_transformation_spin(graph, automorphisms=True, spin_flip=True):
@@ -81,8 +70,8 @@ class qGPS(nn.Module):
     # TODO: add documentation
     M: int
     local_dim: int = 2
-    dtype: DType = complex
-    init_fun: NNInitFunc = qGPS_init(dtype=dtype)
+    dtype: DType = jnp.complex128
+    init_fun: NNInitFunc = normal(dtype=dtype)
     to_indices: Callable = lambda samples : samples.astype(jnp.uint8)
     """
     syms is a tuple of two function representing the symmetry operations.
