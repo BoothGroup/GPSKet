@@ -83,7 +83,7 @@ class qGPS(nn.Module):
     It returns a tuple of two arrays.
     The first returned array should represent the occupancies of all symmetrically equivalent configurations at the updated positions.
     The second array returns the transformed site indices for all symmetry operations.
-    For all returned arrays of the syms function, the last dimension corresponds to the totl number of symmetry operations.  
+    For all returned arrays of the syms function, the last dimension corresponds to the totl number of symmetry operations.
     """
     syms: Union[Callable, Tuple[Callable, Callable]] = no_syms()
     before_sym_op: Callable = lambda argument : argument
@@ -98,6 +98,7 @@ class qGPS(nn.Module):
             self.symmetries = self.syms
             self.fast_update = False
 
+    # TODO: modify this so that last dimension of inputs can have the same shape as the update sites
     @nn.compact
     def __call__(self, inputs, save_site_prod=False, update_sites=None):
         if len(inputs.shape) == 1:
@@ -107,22 +108,27 @@ class qGPS(nn.Module):
 
         indices = self.to_indices(inputs)
 
-        if save_site_prod or update_sites is not None:
+        if save_site_prod or (update_sites is not None and self.fast_update):
             site_product_save = self.variable("workspace", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
             indices_save = self.variable("workspace", "samples", lambda : jnp.zeros(0, dtype=indices.dtype))
 
         if update_sites is None or not self.fast_update:
-            transformed_samples = self.symmetries(indices)
+            def evaluate_site_product(sample):
+                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1).reshape(-1)
 
-            # TODO: maybe this can be improved
-            def take_site_product(indices, epsilon):
-                return jnp.take_along_axis(epsilon, indices, axis=0).prod(axis=-1).reshape(-1)
+            if save_site_prod:
+                def outer_sym_batching(site_prod):
+                    return site_prod
+            else:
+                def outer_sym_batching(site_prod):
+                    return jnp.sum(self.before_sym_op(site_prod))
 
-            batched = jax.vmap(take_site_product, (0, None), 0)
-            batched = jax.vmap(batched, (-1, None), -1)
+            def get_site_prod_or_val(carry, sample):
+                symmetrically_equivalent_samps = self.symmetries(sample)
+                return (None, outer_sym_batching(jax.vmap(evaluate_site_product, -1, -1)(symmetrically_equivalent_samps)))
 
-            transformed_samples = jnp.expand_dims(transformed_samples, (-4, -3))
-            site_prod = batched(transformed_samples, epsilon)
+            transformed_samples = jnp.expand_dims(indices, (1, 2)) # required for the inner take_along_axis
+            site_prod_or_value = jax.lax.scan(get_site_prod_or_val, None, transformed_samples)[1]
         else:
             if len(update_sites.shape) == 1:
                 update_sites = jnp.expand_dims(update_sites, 0)
@@ -140,12 +146,15 @@ class qGPS(nn.Module):
                 inv_sym_old, inv_sym_sites = self.symmetries_inverse(sample_old, update_sites)
 
                 return jax.vmap(inner_site_product_update, in_axes=(-1, -1, -1, -1), out_axes=-1)(site_product, inv_sym_new, inv_sym_old, inv_sym_sites)
-            site_prod = jax.vmap(outer_site_product_update, in_axes=(0,0,0,0), out_axes=0)(site_prod, new_samples, old_samples, update_sites)
+
+            site_prod_or_value = jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_prod, new_samples, old_samples, update_sites)
 
         if save_site_prod:
-            site_product_save.value = site_prod
+            site_product_save.value = site_prod_or_value
             indices_save.value = indices
 
-        qGPS_out = self.before_sym_op(site_prod.sum(axis=-2))
-        qGPS_out = self.final_op(qGPS_out.sum(axis=-1))
-        return qGPS_out
+        if save_site_prod or (update_sites is not None and self.fast_update):
+            site_prod_or_value = self.before_sym_op(site_prod_or_value.sum(axis=-2))
+            site_prod_or_value = self.final_op(site_prod_or_value.sum(axis=-1))
+
+        return self.final_op(site_prod_or_value)
