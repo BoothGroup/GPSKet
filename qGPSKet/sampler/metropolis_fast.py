@@ -38,7 +38,8 @@ class MetropolisFastSampler(MetropolisSampler):
                 )
 
                 params = {**parameters, **s.workspace}
-                value, new_workspace = machine.apply(params, σp, mutable="workspace", save_site_prod=True, update_sites=update_sites)
+                updated_occupancy = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(σp, update_sites)
+                value, new_workspace = machine.apply(params, updated_occupancy, mutable="workspace", save_site_prod=True, update_sites=update_sites)
                 proposal_log_prob = (
                     sampler.machine_pow * value.real
                 )

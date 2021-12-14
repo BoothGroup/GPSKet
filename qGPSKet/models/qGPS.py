@@ -5,6 +5,7 @@ import flax.linen as nn
 from netket.utils import HashableArray
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from typing import Tuple, Union
+from netket.hilbert.homogeneous import HomogeneousHilbert
 from qGPSKet.nn.initializers import normal
 
 
@@ -23,9 +24,9 @@ def get_sym_transformation_spin(graph, automorphisms=True, spin_flip=True):
                 out = jnp.take(samples, syms, axis=-1)
                 out = jnp.concatenate((out, 1-out), axis=-1)
                 return out
-            def inv_symmetries(sample, indices):
+            def inv_symmetries(sample_at_indices, indices):
                 inv_sym_sites = jnp.concatenate((inv_syms[indices], inv_syms[indices]), axis=-1)
-                inv_sym_occs = jnp.tile(jnp.expand_dims(sample[indices], axis=-1), syms.shape[1])
+                inv_sym_occs = jnp.tile(jnp.expand_dims(sample_at_indices, axis=-1), syms.shape[1])
                 inv_sym_occs = jnp.concatenate((inv_sym_occs, 1-inv_sym_occs), axis=-1)
                 return inv_sym_occs, inv_sym_sites
 
@@ -33,9 +34,9 @@ def get_sym_transformation_spin(graph, automorphisms=True, spin_flip=True):
             def symmetries(samples):
                 out = jnp.take(samples, syms, axis=-1)
                 return out
-            def inv_symmetries(sample, indices):
+            def inv_symmetries(sample_at_indices, indices):
                 inv_sym_sites = inv_syms[indices]
-                inv_sym_occs = jnp.tile(jnp.expand_dims(sample[indices], axis=-1), syms.shape[1])
+                inv_sym_occs = jnp.tile(jnp.expand_dims(sample_at_indices, axis=-1), syms.shape[1])
                 return inv_sym_occs, inv_sym_sites
     else:
         if spin_flip:
@@ -43,31 +44,32 @@ def get_sym_transformation_spin(graph, automorphisms=True, spin_flip=True):
                 out = jnp.expand_dims(samples, axis=-1)
                 out = jnp.concatenate((out, 1-out), axis=-1)
                 return out
-            def inv_symmetries(sample, indices):
+            def inv_symmetries(sample_at_indices, indices):
                 inv_sym_sites = jnp.expand_dims(indices, axis=-1)
                 inv_sym_sites = jnp.concatenate((inv_sym_sites, inv_sym_sites), axis=-1)
-                inv_sym_occs = jnp.expand_dims(sample[indices], axis=-1)
+                inv_sym_occs = jnp.expand_dims(sample_at_indices, axis=-1)
                 inv_sym_occs = jnp.concatenate((inv_sym_occs, 1-inv_sym_occs), axis=-1)
                 return inv_sym_occs, inv_sym_sites
         else:
             def symmetries(samples):
                 out = jnp.expand_dims(samples, axis=-1)
                 return out
-            def inv_symmetries(sample, indices):
+            def inv_symmetries(sample_at_indices, indices):
                 inv_sym_sites = jnp.expand_dims(indices, axis=-1)
-                inv_sym_occs = jnp.expand_dims(sample[indices], axis=-1)
+                inv_sym_occs = jnp.expand_dims(sample_at_indices, axis=-1)
                 return inv_sym_occs, inv_sym_sites
     return (symmetries, inv_symmetries)
 
 # default syms function (no symmetries)
 def no_syms():
     symmetries = lambda samples : jnp.expand_dims(samples, axis=-1)
-    inv_sym = lambda sample, indices : (jnp.expand_dims(jnp.take(sample, indices), axis=-1), jnp.expand_dims(indices, axis=-1))
+    inv_sym = lambda sample_at_indices, indices : (jnp.expand_dims(sample_at_indices, axis=-1), jnp.expand_dims(indices, axis=-1))
     return (symmetries, inv_sym)
 
 # TODO: the framework for the symmetrisation could (and should) definitely be improved at one point
 class qGPS(nn.Module):
     # TODO: add documentation
+    hilbert: HomogeneousHilbert
     M: int
     local_dim: int = 2
     dtype: DType = jnp.complex128
@@ -97,20 +99,25 @@ class qGPS(nn.Module):
         else:
             self.symmetries = self.syms
             self.fast_update = False
+        self.L = self.hilbert.size
 
-    # TODO: modify this so that last dimension of inputs can have the same shape as the update sites
     @nn.compact
     def __call__(self, inputs, save_site_prod=False, update_sites=None):
         if len(inputs.shape) == 1:
             inputs = jnp.expand_dims(inputs, 0)
 
-        epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, inputs.shape[-1]), self.dtype)
-
         indices = self.to_indices(inputs)
+
+        epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, self.L), self.dtype)
 
         if save_site_prod or (update_sites is not None and self.fast_update):
             site_product_save = self.variable("workspace", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
             indices_save = self.variable("workspace", "samples", lambda : jnp.zeros(0, dtype=indices.dtype))
+
+        if update_sites is not None and not self.fast_update:
+            def update_fun(saved_config, update_sites, occs):
+                return saved_config.value.at[update_sites].set(indices)
+            indices = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
 
         if update_sites is None or not self.fast_update:
             def evaluate_site_product(sample):
@@ -134,7 +141,7 @@ class qGPS(nn.Module):
                 update_sites = jnp.expand_dims(update_sites, 0)
             site_prod = site_product_save.value
             new_samples = indices
-            old_samples = indices_save.value
+            old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save.value, update_sites)
 
             def inner_site_product_update(site_prod, new_occs, old_occs, sites):
                 site_prod_new = site_prod / (epsilon[old_occs,:,sites].prod(axis=0))
@@ -151,7 +158,12 @@ class qGPS(nn.Module):
 
         if save_site_prod:
             site_product_save.value = site_prod_or_value
-            indices_save.value = indices
+            if (update_sites is not None and self.fast_update):
+                def update_fun(saved_config, update_sites, occs):
+                    return saved_config.at[update_sites].set(occs)
+                indices_save.value = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
+            else:
+                indices_save.value = indices
 
         if save_site_prod or (update_sites is not None and self.fast_update):
             site_prod_or_value = self.before_sym_op(site_prod_or_value.sum(axis=-2))

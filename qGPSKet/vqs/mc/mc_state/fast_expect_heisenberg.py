@@ -38,8 +38,7 @@ def local_en(logpsi, pars, samples, args):
             def compute_element(connected_index):
                 mel = operator_element[basis_index, connected_index]
                 new_occ = 2*tensor_basis_mapping[connected_index]-1.
-                shifted_conf = sample.at[acting_on_element].set(new_occ)
-                log_amp_connected = logpsi(parameters, shifted_conf, update_sites=acting_on_element)
+                log_amp_connected = logpsi(parameters, new_occ, update_sites=acting_on_element)
                 return mel * jnp.exp(log_amp_connected[0] - log_amp)
             off_diag_index = off_diag_connected[basis_index]
             off_diag = jax.lax.cond(off_diag_index != basis_index, compute_element, lambda x: 0.j, off_diag_index)
