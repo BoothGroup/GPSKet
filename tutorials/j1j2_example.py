@@ -4,7 +4,7 @@ from mpi4py import MPI
 from qGPSKet.operator.hamiltonian import get_J1_J2_Hamiltonian
 from qGPSKet.models import qGPS, ARqGPS, get_sym_transformation_spin
 from qGPSKet.sampler import ARDirectSampler
-
+from qGPSKet.sampler.metropolis_fast import MetropolisFastSampler
 
 # MPI variables
 comm = MPI.COMM_WORLD.Create(MPI.COMM_WORLD.Get_group())
@@ -34,15 +34,19 @@ hi = ha.hilbert
 g = ha.graph
 
 # Ansatz model
-to_indices = lambda x: jnp.asarray((x+hi.local_size-1)/hi.local_size, jnp.int8)
+to_indices = lambda x: x.astype(jnp.uint8)
 if ansatz == 'qgps':
+    # this import ensures that the fast version for the expectation value computation is used
+    import qGPSKet.vqs.mc.mc_state.fast_expect_heisenberg
     model = qGPS(M, dtype=dtype, to_indices=to_indices, syms=get_sym_transformation_spin(g))
 elif ansatz == 'arqgps':
     apply_symmetries, _ = get_sym_transformation_spin(g, spin_flip=False)
     model = ARqGPS(hi, M, dtype=dtype, to_indices=to_indices, apply_symmetries=apply_symmetries)
 
 # Sampler
-if sampler == 'metropolis-exchange':
+if sampler == 'metropolis-exchange' and ansatz == "qgps":
+    sa = MetropolisFastSampler(hi, graph=g, n_chains=1)
+elif sampler == 'metropolis-exchange':
     sa = nk.sampler.MetropolisExchange(hi, graph=g, n_chains=1)
 elif sampler == 'ar-direct':
     sa = ARDirectSampler(hi, n_chains_per_rank=samples_per_rank)
