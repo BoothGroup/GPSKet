@@ -19,7 +19,7 @@ def edges_1D(L, next_neighbours=True):
             edges.append([i, (i + 2)%L, 1])
     return edges
 
-def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True):
+def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True, total_sz=0.0):
     if J2 != 0.:
         next_neighbours = True
     else:
@@ -31,7 +31,7 @@ def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True):
         edges = edges_2D(Lx, Ly, next_neighbours=next_neighbours)
 
     g = nk.graph.Graph(edges=edges)
-    hilbert = nk.hilbert.Spin(0.5, N=g.n_nodes)
+    hilbert = nk.hilbert.Spin(0.5, total_sz=total_sz, N=g.n_nodes)
 
     if J2 != 0:
         hamiltonian = nk.operator.Heisenberg(hilbert, g, J=[J1/4, J2/4], sign_rule=sign_rule)
