@@ -121,18 +121,23 @@ class qGPS(nn.Module):
 
         if update_sites is None or not self.fast_update:
             def evaluate_site_product(sample):
-                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1).reshape(-1)
+                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1)
 
             if save_site_prod:
                 def outer_sym_batching(site_prod):
-                    return site_prod
+                    return jnp.moveaxis(site_prod, 0, -1)
+                def scan_function(carry, sample):
+                    return (None, jnp.squeeze(evaluate_site_product(sample)))
             else:
                 def outer_sym_batching(site_prod):
                     return jnp.sum(self.before_sym_op(site_prod))
+                def scan_function(carry, sample):
+                    return (None, jnp.sum(evaluate_site_product(sample)))
 
             def get_site_prod_or_val(carry, sample):
-                symmetrically_equivalent_samps = self.symmetries(sample)
-                return (None, outer_sym_batching(jax.vmap(evaluate_site_product, -1, -1)(symmetrically_equivalent_samps)))
+                symmetrically_equivalent_samps = jnp.moveaxis(self.symmetries(sample), -1, 0)
+                value = jax.lax.scan(scan_function, None, symmetrically_equivalent_samps)[1]
+                return (None, outer_sym_batching(value))
 
             transformed_samples = jnp.expand_dims(indices, (1, 2)) # required for the inner take_along_axis
             site_prod_or_value = jax.lax.scan(get_site_prod_or_val, None, transformed_samples)[1]
