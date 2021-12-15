@@ -37,7 +37,7 @@ g = ha.graph
 to_indices = lambda x: x.astype(jnp.uint8)
 if ansatz == 'qgps':
     # this import ensures that the fast version for the expectation value computation is used
-    import qGPSKet.vqs.mc.mc_state.fast_expect_heisenberg
+    import qGPSKet.vqs.mc.mc_state.expect_heisenberg
     model = qGPS(hi, M, dtype=dtype, to_indices=to_indices, syms=get_sym_transformation_spin(g))
 elif ansatz == 'arqgps':
     apply_symmetries, _ = get_sym_transformation_spin(g, spin_flip=False)
