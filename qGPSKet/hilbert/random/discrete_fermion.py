@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 
 @nk.hilbert.random.random_state.dispatch
-def random_state(hilb: FermionicDiscreteHilbert, key, batches: int, *, out=None, dtype=jnp.uint8):
+def random_state(hilb: FermionicDiscreteHilbert, key, batches: int, *, dtype=jnp.uint8):
     shape = (batches, hilb._size)
 
     if hilb._n_elec is None:
