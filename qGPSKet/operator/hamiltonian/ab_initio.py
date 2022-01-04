@@ -5,7 +5,6 @@ from numba import jit
 from netket.utils.types import DType
 
 from qGPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
-from qGPSKet.operator.fermion import FermionicDiscreteOperator
 
 class AbInitioHamiltonian(FermionicDiscreteOperator):
     def __init__(self, hilbert, h_mat, eri_mat):
@@ -40,6 +39,9 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
         for batch_id in range(x.shape[0]):
             is_occ_up = (x[batch_id] & 1).astype(np.bool8)
             is_occ_down = (x[batch_id] & 2).astype(np.bool8)
+
+            up_count = np.cumsum(is_occ_up)
+            down_count = np.cumsum(is_occ_down)
 
             is_empty_up = ~is_occ_up
             is_empty_down = ~is_occ_down
@@ -88,7 +90,8 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
             for i in up_occ_inds:
                 for a in up_unocc_inds:
                     x_prime[c, :] = x[batch_id, :]
-                    multiplicator = apply_hopping(i, a, x_prime[c], 1)
+                    multiplicator = apply_hopping(i, a, x_prime[c], 1,
+                                                  cummulative_count=up_count)
                     value = t[i, a]
                     for k in up_occ_inds:
                         value += eri[i, a, k, k]
@@ -103,7 +106,8 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
             for i in down_occ_inds:
                 for a in down_unocc_inds:
                     x_prime[c, :] = x[batch_id, :]
-                    multiplicator = apply_hopping(i, a, x_prime[c], 2)
+                    multiplicator = apply_hopping(i, a, x_prime[c], 2,
+                                                  cummulative_count=down_count)
                     value = t[i, a]
                     for k in down_occ_inds:
                         value += eri[i, a, k, k]
@@ -123,8 +127,18 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
                         for b in up_unocc_inds:
                             if i != j and a != b:
                                 x_prime[c, :] = x[batch_id, :]
-                                multiplicator = apply_hopping(i, a, x_prime[c], 1)
-                                multiplicator *= apply_hopping(j, b, x_prime[c], 1)
+                                multiplicator = apply_hopping(i, a, x_prime[c], 1,
+                                                              cummulative_count=up_count)
+                                multiplicator *= apply_hopping(j, b, x_prime[c], 1,
+                                                              cummulative_count=up_count)
+                                # take first hop into account
+                                left_limit = min(j, b)
+                                right_limit = max(j, b) - 1
+                                if i <= right_limit and i > left_limit:
+                                    multiplicator *= -1
+                                if a <= right_limit and a > left_limit:
+                                    multiplicator *= -1
+
                                 mels[c] = 0.5 * multiplicator * eri[i,a,j,b]
                                 c += 1
             for i in down_occ_inds:
@@ -132,18 +146,30 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
                     for j in down_occ_inds:
                         for b in down_unocc_inds:
                             if i != j and a != b:
-                                x_prime[c, :] = x[batch_id, :]
-                                multiplicator = apply_hopping(i, a, x_prime[c], 2)
-                                multiplicator *= apply_hopping(j, b, x_prime[c], 2)
-                                mels[c] = 0.5 * multiplicator * eri[i,a,j,b]
-                                c += 1
+                                if i != j and a != b:
+                                    x_prime[c, :] = x[batch_id, :]
+                                    multiplicator = apply_hopping(i, a, x_prime[c], 2,
+                                                                  cummulative_count=down_count)
+                                    multiplicator *= apply_hopping(j, b, x_prime[c], 2,
+                                                                   cummulative_count=down_count)
+                                    # take first hop into account
+                                    left_limit = min(j, b)
+                                    right_limit = max(j, b) - 1
+                                    if i <= right_limit and i > left_limit:
+                                        multiplicator *= -1
+                                    if a <= right_limit and a > left_limit:
+                                        multiplicator *= -1
+                                    mels[c] = 0.5 * multiplicator * eri[i,a,j,b]
+                                    c += 1
             for i in up_occ_inds:
                 for a in up_unocc_inds:
                     for j in down_occ_inds:
                         for b in down_unocc_inds:
                             x_prime[c, :] = x[batch_id, :]
-                            multiplicator = apply_hopping(i, a, x_prime[c], 1)
-                            multiplicator *= apply_hopping(j, b, x_prime[c], 2)
+                            multiplicator = apply_hopping(i, a, x_prime[c], 1,
+                                                          cummulative_count=up_count)
+                            multiplicator *= apply_hopping(j, b, x_prime[c], 2,
+                                                           cummulative_count=down_count)
                             mels[c] = multiplicator * eri[i,a,j,b]
                             c += 1
             sections[batch_id] = c
