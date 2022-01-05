@@ -153,21 +153,20 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
                     for j in down_occ_inds:
                         for b in down_unocc_inds:
                             if i != j and a != b:
-                                if i != j and a != b:
-                                    x_prime[c, :] = x[batch_id, :]
-                                    multiplicator = apply_hopping(i, a, x_prime[c], 2,
-                                                                  cummulative_count=down_count)
-                                    multiplicator *= apply_hopping(j, b, x_prime[c], 2,
-                                                                   cummulative_count=down_count)
-                                    # take first hop into account
-                                    left_limit = min(j, b)
-                                    right_limit = max(j, b) - 1
-                                    if i <= right_limit and i > left_limit:
-                                        multiplicator *= -1
-                                    if a <= right_limit and a > left_limit:
-                                        multiplicator *= -1
-                                    mels[c] = 0.5 * multiplicator * eri[i,a,j,b]
-                                    c += 1
+                                x_prime[c, :] = x[batch_id, :]
+                                multiplicator = apply_hopping(i, a, x_prime[c], 2,
+                                                                cummulative_count=down_count)
+                                multiplicator *= apply_hopping(j, b, x_prime[c], 2,
+                                                                cummulative_count=down_count)
+                                # take first hop into account
+                                left_limit = min(j, b)
+                                right_limit = max(j, b) - 1
+                                if i <= right_limit and i > left_limit:
+                                    multiplicator *= -1
+                                if a <= right_limit and a > left_limit:
+                                    multiplicator *= -1
+                                mels[c] = 0.5 * multiplicator * eri[i,a,j,b]
+                                c += 1
             for i in up_occ_inds:
                 for a in up_unocc_inds:
                     for j in down_occ_inds:
