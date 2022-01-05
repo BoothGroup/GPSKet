@@ -28,16 +28,16 @@ if batch_size % n_nodes != 0:
     raise ValueError("Define a batch size that is a multiple of the number of MPI ranks")
 samples_per_rank = batch_size // n_nodes
 
-# Get Hamiltoniana, Hilbert space and graph
-ha = get_J1_J2_Hamiltonian(L)
+# Get Hamiltonian, Hilbert space and graph
+# The on the fly calculation of the local energy is only faster for the
+# qGPS model where fast updating can be performed.
+ha = get_J1_J2_Hamiltonian(L, on_the_fly_en=(ansatz == "qgps"))
 hi = ha.hilbert
 g = ha.graph
 
 # Ansatz model
 to_indices = lambda x: x.astype(jnp.uint8)
 if ansatz == 'qgps':
-    # this import ensures that the fast version for the expectation value computation is used
-    import qGPSKet.vqs.mc.mc_state.expect_heisenberg
     model = qGPS(hi, M, dtype=dtype, to_indices=to_indices, syms=get_sym_transformation_spin(g))
 elif ansatz == 'arqgps':
     apply_symmetries, _ = get_sym_transformation_spin(g, spin_flip=False)
