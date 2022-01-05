@@ -19,7 +19,7 @@ In particular it gives us the 1 and 2 electron integrals (h1 and h2) which are r
 Hamiltonian with qGPSKet/NetKet.
 The Hamiltonian is either represented in a canonical or a "local" orbital basis.
 """
-local_basis = True
+local_basis = False
 
 mol = gto.Mole()
 
