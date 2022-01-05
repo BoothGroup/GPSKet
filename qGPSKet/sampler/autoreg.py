@@ -62,16 +62,6 @@ class ARDirectSampler(Sampler):
 
     def _sample_chain(sampler, model, variables, state, chain_length):
         σ, new_state = _sample_chain(sampler, model, variables, state, chain_length)
-        if hasattr(model, 'symmetries'):
-            # Sample symmetry transformations from uniform distribution
-            # and apply them to each configuration in the batch
-            # TODO: implement spin-flip symmetry
-            σ, new_state = _sample_chain(sampler, model, variables, state, chain_length)
-            new_key, key_symm = jax.random.split(new_state.key)
-            r = jax.random.randint(key_symm, shape=(sampler.n_chains_per_rank,), minval=0, maxval=model.symmetries.shape[0])
-            idx = jnp.expand_dims(model.symmetries.to_array()[r, :], axis=0)
-            σ = jnp.take_along_axis(σ, idx, axis=2)
-            new_state = new_state.replace(key=new_key)
         return σ, new_state
 
     def _sample_next(sampler, model, variables, state):
@@ -111,12 +101,13 @@ def _sample_chain(sampler, model, variables, state, chain_length):
 
         return (σ, cache, new_key), None
 
-    new_key, key_init, key_scan = jax.random.split(state.key, 3)
+    new_key, key_init, key_scan, key_symm = jax.random.split(state.key, 4)
 
     # We just need a buffer for `σ` before generating each sample
     # The result does not depend on the initial contents in it
+    batch_size = chain_length * sampler.n_chains_per_rank
     σ = jnp.zeros(
-        (chain_length * sampler.n_chains_per_rank, sampler.hilbert.size),
+        (batch_size, sampler.hilbert.size),
         dtype=sampler.dtype,
     )
 
@@ -130,6 +121,14 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         (σ, cache, key_scan),
         indices,
     )
+
+    # Apply symmetries
+    σ = model.apply_symmetries(σ) # (B, L, T)
+
+    # Sample transformations uniformly
+    r = jax.random.randint(key_symm, shape=(batch_size,), minval=0, maxval=σ.shape[-1])
+    σ = jnp.take_along_axis(σ, jnp.expand_dims(r, axis=(-2,-1)), axis=-1).reshape(σ.shape[:-1]) # (B, L)
+
     σ = σ.reshape((chain_length, sampler.n_chains_per_rank, sampler.hilbert.size))
 
     new_state = state.replace(key=new_key)
