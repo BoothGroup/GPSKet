@@ -16,13 +16,20 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
         self.t_mat = self.h_mat - 0.5 * np.einsum("prrq->pq", eri_mat)
 
     @property
+    def is_hermitian(self) -> bool:
+        return True
+
+    @property
     def dtype(self) -> DType:
         return float
 
-    def get_conn_flattened(self, x, sections):
-        x = x.astype(np.uint8)
+    # pad argument is just a dummy at the moment,
+    # TODO: include padding for unconstrained Hilbert spaces
+    def get_conn_flattened(self, x, sections, pad=True):
+        assert(not pad or self.hilbert._has_constraint)
 
-        x_primes, mels = self._get_conn_flattened_kernel(x, sections, self.t_mat, self.eri_mat)
+        x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
+                                                         sections, self.t_mat, self.eri_mat)
 
         return x_primes, mels
 
