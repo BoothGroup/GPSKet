@@ -71,7 +71,6 @@ class qGPS(nn.Module):
     # TODO: add documentation
     hilbert: HomogeneousHilbert
     M: int
-    local_dim: int = 2
     dtype: DType = jnp.complex128
     init_fun: NNInitFunc = normal(dtype=dtype)
     to_indices: Callable = lambda samples : samples.astype(jnp.uint8)
@@ -85,7 +84,7 @@ class qGPS(nn.Module):
     It returns a tuple of two arrays.
     The first returned array should represent the occupancies of all symmetrically equivalent configurations at the updated positions.
     The second array returns the transformed site indices for all symmetry operations.
-    For all returned arrays of the syms function, the last dimension corresponds to the totl number of symmetry operations.
+    For all returned arrays of the syms function, the last dimension corresponds to the total number of symmetry operations.
     """
     syms: Union[Callable, Tuple[Callable, Callable]] = no_syms()
     before_sym_op: Callable = lambda argument : argument
@@ -100,6 +99,7 @@ class qGPS(nn.Module):
             self.symmetries = self.syms
             self.fast_update = False
         self.L = self.hilbert.size
+        self.local_dim = self.hilbert.local_size
 
     @nn.compact
     def __call__(self, inputs, save_site_prod=False, update_sites=None):
