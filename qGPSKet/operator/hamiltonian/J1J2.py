@@ -116,7 +116,7 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly):
     acting_on = jnp.array(op.acting_on)
     return (samples, (operators, acting_on))
 
-@nk.vqs.get_local_kernel.dispatch(precedence=1)
+@nk.vqs.get_local_kernel.dispatch
 def get_local_kernel(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly, chunk_size: Optional[int] = None):
     use_fast_update = isinstance(vstate.model, qGPS)
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)
