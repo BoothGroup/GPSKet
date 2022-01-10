@@ -19,7 +19,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
         self.h_mat = h_mat
         self.eri_mat = eri_mat
 
-        # see [Neuscamman (2013), https://doi.org/10.1063/1.4829835] for the definition of t
+        # See [Neuscamman (2013), https://doi.org/10.1063/1.4829835] for the definition of t
         self.t_mat = self.h_mat - 0.5 * np.einsum("prrq->pq", eri_mat)
 
     @property
@@ -30,7 +30,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
     def dtype(self) -> DType:
         return float
 
-    # pad argument is just a dummy at the moment,
+    # Pad argument is just a dummy at the moment,
     # TODO: include padding for unconstrained Hilbert spaces
     def get_conn_flattened(self, x, sections, pad=True):
         assert(not pad or self.hilbert._has_constraint)
@@ -40,7 +40,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
 
         return x_primes, mels
 
-    # this implementation follows the approach outlined in [Neuscamman (2013), https://doi.org/10.1063/1.4829835].
+    # This implementation follows the approach outlined in [Neuscamman (2013), https://doi.org/10.1063/1.4829835].
     @staticmethod
     @jit(nopython=True)
     def _get_conn_flattened_kernel(x, sections, t, eri):
@@ -100,7 +100,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
             mels[c] = diag_element
             c += 1
 
-            # one-body parts
+            # One-body parts
             for i in up_occ_inds:
                 for a in up_unocc_inds:
                     x_prime[c, :] = x[batch_id, :]
@@ -134,7 +134,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
                     mels[c] = multiplicator * value
                     c += 1
 
-            # two body parts
+            # Two body parts
             for i in up_occ_inds:
                 for a in up_unocc_inds:
                     for j in up_occ_inds:
@@ -165,7 +165,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
                                                               cummulative_count=down_count)
                                 multiplicator *= apply_hopping(j, b, x_prime[c], 2,
                                                                cummulative_count=down_count)
-                                # take first hop into account
+                                # Take first hop into account
                                 left_limit = min(j, b)
                                 right_limit = max(j, b) - 1
                                 if i <= right_limit and i > left_limit:
@@ -199,18 +199,17 @@ class AbInitioHamiltonianOnTheFly(AbInitioHamiltonian):
 """ Helper function which returns the parity for an electron hop by counting
 how many electrons the hopping electron moves past moved past. Careful!, this
 is only valid if it is a valid electron move, this function does NOT do any
-check if the move is valid (in contrast to the apply_hopping function) of the
-general fermion operator file"""
+check if the move is valid (in contrast to the apply_hopping function of the
+general fermion operator file)"""
 def get_parity_multiplicator_hop(update_sites, cummulative_el_count):
     limits = jnp.sort(update_sites)
     parity_count = (cummulative_el_count[limits[1] - 1] - cummulative_el_count[limits[0]])
-    # type promotion is important as this gives bad results for
+    # Type promotion is important, gives incorrect results if not cast to unsigned int
     return (jnp.int32(1) - 2 * (parity_count & 1))
 
 def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
     t = args[0]
     eri = args[1]
-    print("correct one")
     def vmap_fun(sample):
         is_occ_up = (sample & 1)
         is_occ_down = (sample & 2) >> 1
