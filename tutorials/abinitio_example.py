@@ -1,9 +1,11 @@
 import netket as nk
 import qGPSKet.models as qGPS
 
+import numpy as np
+
 from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 from qGPSKet.sampler.fermionic_hopping import MetropolisHopping, MetropolisFastHopping
-from qGPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonian
+from qGPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonian, AbInitioHamiltonianOnTheFly
 
 from qGPSKet.models import qGPS
 
@@ -105,7 +107,7 @@ The key elements different from standard netket calculations are:
 hi = FermionicDiscreteHilbert(norb, n_elec=(nelec//2,nelec//2))
 
 # Set up ab-initio Hamiltonian
-ha = AbInitioHamiltonian(hi, h1, h2)
+ha = AbInitioHamiltonianOnTheFly(hi, h1, h2)
 
 
 # If we want, we can compare the exact energies given by the PySCF and the NetKet solver
