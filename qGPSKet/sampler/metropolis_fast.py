@@ -16,7 +16,10 @@ class MetropolisFastSampler(MetropolisSampler):
     def _sample_next(sampler, machine, parameters, state):
         """
         Fast implementation of the _sample_next function for qGPS models (allowing for fast updates),
-        implementation is based on the original netket implementation for the metropolis sampler
+        implementation is based on the original netket implementation for the metropolis sampler.
+        Note that the updating is still not strictly constant in the system size as full configurations
+        (together with intermediate values) are copied at each sampling step. However there is less
+        overhead as the amplitude computation is performed by fast updating.
         """
         new_rng, rng = jax.random.split(state.rng)
 
