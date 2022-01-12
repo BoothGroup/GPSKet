@@ -4,7 +4,7 @@ from mpi4py import MPI
 from qGPSKet.operator.hamiltonian import get_J1_J2_Hamiltonian
 from qGPSKet.models import qGPS, ARqGPS, get_sym_transformation_spin
 from qGPSKet.sampler import ARDirectSampler
-from qGPSKet.sampler.metropolis_fast import MetropolisFastSampler
+from qGPSKet.sampler.metropolis_fast import MetropolisFastExchange
 
 # MPI variables
 comm = MPI.COMM_WORLD.Create(MPI.COMM_WORLD.Get_group())
@@ -14,9 +14,9 @@ n_nodes = comm.Get_size()
 # Parameters
 L = 20
 M = 2
-ansatz = 'arqgps'
+ansatz = 'qgps'
 dtype = jnp.complex128
-sampler = 'ar-direct'
+sampler = 'metropolis-exchange'
 batch_size = 100
 n_discard = 100
 learning_rate = 0.01
@@ -45,7 +45,7 @@ elif ansatz == 'arqgps':
 
 # Sampler
 if sampler == 'metropolis-exchange' and ansatz == "qgps":
-    sa = MetropolisFastSampler(hi, graph=g, n_chains=1)
+    sa = MetropolisFastExchange(hi, graph=g, n_chains=1)
 elif sampler == 'metropolis-exchange':
     sa = nk.sampler.MetropolisExchange(hi, graph=g, n_chains=1)
 elif sampler == 'ar-direct':
