@@ -127,7 +127,7 @@ class qGPS(nn.Module):
                 def outer_sym_batching(site_prod):
                     return jnp.moveaxis(site_prod, 0, -1)
                 def scan_function(carry, sample):
-                    return (None, jnp.squeeze(evaluate_site_product(sample)))
+                    return (None, evaluate_site_product(sample).reshape(-1))
             else:
                 def outer_sym_batching(site_prod):
                     return jnp.sum(self.before_sym_op(site_prod))
