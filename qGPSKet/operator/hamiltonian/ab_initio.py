@@ -535,7 +535,7 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianOn
     eri = jnp.array(op.eri_mat)
     return (samples, (t, eri))
 
-@nk.vqs.get_local_kernel.dispatch
+@nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianOnTheFly, chunk_size: Optional[int] = None):
     use_fast_update = isinstance(vstate.model, qGPS) and op.use_fast_update
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)
