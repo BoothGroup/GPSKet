@@ -129,13 +129,13 @@ class ARqGPS(AbstractARqGPS):
         if jnp.ndim(inputs) == 1:
             inputs = jnp.expand_dims(inputs, axis=0) # (B, L)
 
-        # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L)
-        batch_size = inputs.shape[0]
-
         # Transform inputs according to symmetries
         inputs = self.apply_symmetries(inputs) # (B, L, T)
         n_symm = inputs.shape[-1]
+
+        # Convert input configurations into indices
+        inputs = self.to_indices(inputs) # (B, L)
+        batch_size = inputs.shape[0]
 
         # Compute conditional log-probabilities
         log_psi = jax.vmap(_conditionals, in_axes=(None, -1), out_axes=-1)(self, inputs) # (B, L, D, T)
@@ -228,7 +228,8 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
 
 def _conditionals(model: ARqGPS, inputs: Array) -> Array:
     # Convert input configurations into indices
-    inputs = model.to_indices(inputs) # (B, L)
+    # FIXME: check if this line below can be removed
+    # inputs = model.to_indices(inputs) # (B, L)
     batch_size = inputs.shape[0]
 
     # Loop over sites while computing log conditional probabilities
