@@ -265,7 +265,7 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                 outer_count = outer_arg[0]
                 def inner_while_body(inner_arg):
                     inner_count = inner_arg[0]
-                    count = (inner_count, outer_count)
+                    count = (outer_count, inner_count)
                     index_0 = indices_0[count[tensor_ids[0]]]
                     index_1 = indices_1[count[tensor_ids[1]]]
                     index_2 = indices_2[count[tensor_ids[2]]]
