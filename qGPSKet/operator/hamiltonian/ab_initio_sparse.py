@@ -18,17 +18,21 @@ from qGPSKet.models import qGPS
 class AbInitioHamiltonianSparse(AbInitioHamiltonian):
     def __init__(self, hilbert, h_mat, eri_mat, use_fast_update=True):
         super().__init__(hilbert, h_mat, eri_mat)
+        self.t_mat = None
+        self.h_mat = jnp.array(self.h_mat)
+        self.eri_mat = jnp.array(self.eri_mat)
         self.use_fast_update = use_fast_update
-        self.h_nonzero = np.zeros(0, dtype=int)
+        self.h_nonzero = jnp.zeros(0, dtype=int)
         self.h_nonzero_secs = np.zeros(self.h_mat.shape[0]+1, dtype=int)
         for j in range(self.h_mat.shape[0]):
             nonzeros = np.nonzero(self.h_mat[j,:])[0]
             self.h_nonzero = np.concatenate((self.h_nonzero, nonzeros))
             self.h_nonzero_secs[j+1] = self.h_nonzero_secs[j] + len(nonzeros)
+        self.h_nonzero_secs = jnp.array(self.h_nonzero_secs)
 
         i_dim = self.eri_mat.shape[1]
 
-        self.eri_nonzero = np.zeros((0,2), dtype=int)
+        self.eri_nonzero = jnp.zeros((0,2), dtype=int)
         self.eri_nonzero_secs = np.zeros(i_dim*self.eri_mat.shape[3]+1, dtype=int)
 
         for j in range(self.eri_mat.shape[3]):
@@ -36,12 +40,8 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                 nonzeros = np.array(np.nonzero(self.eri_mat[:,i,:,j])).T
                 self.eri_nonzero = np.concatenate((self.eri_nonzero, nonzeros), axis=0)
                 self.eri_nonzero_secs[j*i_dim + i + 1] = self.eri_nonzero_secs[j*i_dim + i] + nonzeros.shape[0]
-        self.h_mat_jax = jnp.array(self.h_mat)
-        self.eri_mat_jax = jnp.array(self.eri_mat)
-        self.h_nonzero_jax = jnp.array(self.h_nonzero)
-        self.h_nonzero_secs_jax = jnp.array(self.h_nonzero_secs)
-        self.eri_nonzero_jax = jnp.array(self.eri_nonzero)
-        self.eri_nonzero_secs_jax = jnp.array(self.eri_nonzero_secs)
+
+        self.eri_nonzero_secs = jnp.array(self.eri_nonzero_secs)
 
     """
     This is really only for testing purposes, expectation value automatically
@@ -51,9 +51,9 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
         assert(not pad or self.hilbert._has_constraint)
 
         x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
-                                                         sections, self.h_mat, self.eri_mat,
-                                                         self.h_nonzero, self.h_nonzero_secs,
-                                                         self.eri_nonzero, self.eri_nonzero_secs)
+                                                         sections, np.array(self.h_mat), np.array(self.eri_mat),
+                                                         np.array(self.h_nonzero), np.array(self.h_nonzero_secs),
+                                                         np.array(self.eri_nonzero), np.array(self.eri_nonzero_secs))
 
         return x_primes, mels
 
@@ -402,8 +402,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 @nk.vqs.get_local_kernel_arguments.dispatch
 def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse):
     samples = vstate.samples
-    return (samples, (op.h_mat_jax, op.eri_mat_jax, op.h_nonzero_jax, op.eri_nonzero_jax,
-                      op.h_nonzero_secs_jax, op.eri_nonzero_secs_jax))
+    return (samples, (op.h_mat, op.eri_mat, op.h_nonzero, op.eri_nonzero,
+                      op.h_nonzero_secs, op.eri_nonzero_secs))
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse, chunk_size: Optional[int] = None):
