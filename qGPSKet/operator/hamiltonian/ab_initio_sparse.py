@@ -23,15 +23,18 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
         if h_mat is not None:
             assert(self.hilbert.size == h_mat.shape[0] == h_mat.shape[1])
 
-            self.h_nonzero_inds = np.zeros(0, dtype=int)
-            self.h_nonzero_vals = np.zeros(0, dtype=h_mat.dtype)
+            non_zero = np.sum(h_mat != 0.)
+            self.h_nonzero_inds = np.zeros(non_zero, dtype=int)
+            self.h_nonzero_vals = np.zeros(non_zero, dtype=h_mat.dtype)
             self.h_nonzero_secs = np.zeros(self.hilbert.size+1, dtype=int)
 
+            count = 0
             for j in range(self.hilbert.size):
                 nonzeros = h_mat[j,:].nonzero()[0]
-                self.h_nonzero_inds = np.append(self.h_nonzero_inds, nonzeros)
-                self.h_nonzero_vals = np.append(self.h_nonzero_vals, h_mat[j, nonzeros])
+                self.h_nonzero_inds[count:(count+len(nonzeros))] = nonzeros
+                self.h_nonzero_vals[count:(count+len(nonzeros))] = h_mat[j, nonzeros]
                 self.h_nonzero_secs[j+1] = self.h_nonzero_secs[j] + len(nonzeros)
+                count += len(nonzeros)
 
             self.h_nonzero_inds = jnp.array(self.h_nonzero_inds)
             self.h_nonzero_vals = jnp.array(self.h_nonzero_vals)
@@ -40,16 +43,20 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
 
         if eri_mat is not None:
             assert(self.hilbert.size == eri_mat.shape[0] == eri_mat.shape[1] == eri_mat.shape[2] == eri_mat.shape[3])
-            self.eri_nonzero_inds = np.zeros((0,2), dtype=int)
-            self.eri_nonzero_vals = np.zeros(0, dtype=eri_mat.dtype)
+
+            non_zero = np.sum(eri_mat != 0.)
+            self.eri_nonzero_inds = np.zeros((non_zero,2), dtype=int)
+            self.eri_nonzero_vals = np.zeros(non_zero, dtype=eri_mat.dtype)
             self.eri_nonzero_secs = np.zeros(self.hilbert.size**2+1, dtype=int)
 
+            count = 0
             for j in range(self.hilbert.size):
                 for i in range(self.hilbert.size):
                     nonzeros = np.array(eri_mat[:,i,:,j].nonzero()).T
-                    self.eri_nonzero_inds = np.concatenate((self.eri_nonzero_inds, nonzeros), axis=0)
-                    self.eri_nonzero_vals = np.append(self.eri_nonzero_vals, eri_mat[nonzeros[:,0],i,nonzeros[:,1],j])
+                    self.eri_nonzero_inds[count:(count+nonzeros.shape[0]), :] = nonzeros
+                    self.eri_nonzero_vals[count:(count+nonzeros.shape[0])] = eri_mat[nonzeros[:,0],i,nonzeros[:,1],j]
                     self.eri_nonzero_secs[j*self.hilbert.size + i + 1] = self.eri_nonzero_secs[j*self.hilbert.size + i] + nonzeros.shape[0]
+                    count += nonzeros.shape[0]
 
             self.eri_nonzero_inds = jnp.array(self.eri_nonzero_inds)
             self.eri_nonzero_vals = jnp.array(self.eri_nonzero_vals)
