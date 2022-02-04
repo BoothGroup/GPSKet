@@ -39,7 +39,10 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
             self.h_nonzero_inds = jnp.array(self.h_nonzero_inds)
             self.h_nonzero_vals = jnp.array(self.h_nonzero_vals)
             self.h_nonzero_secs = jnp.array(self.h_nonzero_secs)
-
+        else:
+            self.h_nonzero_inds = None
+            self.h_nonzero_vals = None
+            self.h_nonzero_secs = None
 
         if eri_mat is not None:
             assert(self.hilbert.size == eri_mat.shape[0] == eri_mat.shape[1] == eri_mat.shape[2] == eri_mat.shape[3])
@@ -61,6 +64,10 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
             self.eri_nonzero_inds = jnp.array(self.eri_nonzero_inds)
             self.eri_nonzero_vals = jnp.array(self.eri_nonzero_vals)
             self.eri_nonzero_secs = jnp.array(self.eri_nonzero_secs)
+        else:
+            self.eri_nonzero_inds = None
+            self.eri_nonzero_vals = None
+            self.eri_nonzero_secs = None
 
     """
     This is really only for testing purposes, expectation value automatically
