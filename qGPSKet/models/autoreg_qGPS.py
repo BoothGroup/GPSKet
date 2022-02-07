@@ -93,6 +93,12 @@ class ARqGPS(AbstractARqGPS):
     """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
+    # TODO: extend to cases beyond D=2
+    count_spins: Callable = lambda spins : jnp.stack([(spins+1)&1, ((spins+1)&2)/2], axis=-1).astype(jnp.int32)
+    """Function to count down and up spins"""
+    # TODO: extend to cases where total_sz != 0
+    renormalize_log_psi: Callable = lambda n_spins, hilbert, index: jnp.log(jnp.heaviside(hilbert.size//2-n_spins, 0))
+    """Function to renormalize conditional log probabilities"""
 
     # Dimensions:
     # - B = batch size
@@ -155,7 +161,7 @@ class ARqGPS(AbstractARqGPS):
 def _normalize(log_psi: Array, machine_pow: int) -> Array:
     return log_psi - (1/machine_pow)*logsumexp(machine_pow*log_psi.real, axis=-1, keepdims=True)
 
-def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Array, epsilon: Array, inputs: Array, index: int) -> Union[Tuple, Array]:
+def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable) -> Union[Tuple, Array]:
     # Slice inputs at index-1 to get cached products
     # (Note: when index=0, it doesn't matter what slice of the cache we take,
     # because it is initialized with ones)
@@ -178,10 +184,9 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     log_psi = jnp.sum(prods, axis=-1)
 
     # Update spins count if index is larger than 0, otherwise leave as is
-    # TODO: generalize beyond D=2
     n_spins = jax.lax.cond(
         index > 0,
-        lambda n_spins: n_spins + jnp.stack([jnp.abs(inputs_i-1), inputs_i], axis=-1),
+        lambda n_spins: n_spins + count_spins(inputs_i),
         lambda n_spins: n_spins,
         n_spins
     )
@@ -191,10 +196,9 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf
-    # TODO: extend to cases where total_sz != 0
     log_psi = jax.lax.cond(
         index >= 0,
-        lambda log_psi: log_psi+jnp.log(jnp.heaviside(hilbert.size//2-n_spins, 0)),
+        lambda log_psi: log_psi+renormalize_log_psi(n_spins, hilbert, index),
         lambda log_psi: log_psi,
         log_psi
     )
@@ -216,7 +220,7 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
         n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
     
     # Compute log conditional probabilities
-    (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index)
+    (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
     log_psi = _normalize(log_psi, model.machine_pow)
     
     # Update model cache
@@ -228,14 +232,12 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
 
 def _conditionals(model: ARqGPS, inputs: Array) -> Array:
     # Convert input configurations into indices
-    # FIXME: check if this line below can be removed
-    # inputs = model.to_indices(inputs) # (B, L)
     batch_size = inputs.shape[0]
 
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(carry, index):
         cache, n_spins = carry
-        (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index)
+        (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
         n_spins = jax.lax.cond(
             model.hilbert.constrained,
             lambda n_spins: n_spins,
@@ -245,7 +247,7 @@ def _conditionals(model: ARqGPS, inputs: Array) -> Array:
         return (cache, n_spins), log_psi
 
     cache = jnp.ones((batch_size, model.hilbert.local_size, model.M), model.dtype)
-    n_spins = jnp.zeros((batch_size, model.hilbert.local_size))
+    n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
     indices = jnp.arange(model.hilbert.size)
     _, log_psi = jax.lax.scan(
         _scan_fun,
