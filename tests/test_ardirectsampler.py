@@ -1,10 +1,9 @@
 import jax
-from jax.interpreters.batching import batch
 import jax.numpy as jnp
 import numpy as np
 import netket as nk
 from mpi4py import MPI
-from qGPSKet.models import ARqGPS, get_sym_transformation_spin
+from qGPSKet.models import ARqGPS
 from qGPSKet.sampler import ARDirectSampler
 
 
