@@ -17,31 +17,57 @@ from qGPSKet.models import qGPS
 
 class AbInitioHamiltonianSparse(AbInitioHamiltonian):
     def __init__(self, hilbert, h_mat, eri_mat, use_fast_update=True):
-        super().__init__(hilbert, h_mat, eri_mat)
+        super(AbInitioHamiltonian, self).__init__(hilbert)
         self.use_fast_update = use_fast_update
-        self.h_nonzero = np.zeros(0, dtype=int)
-        self.h_nonzero_secs = np.zeros(self.h_mat.shape[0]+1, dtype=int)
-        for j in range(self.h_mat.shape[0]):
-            nonzeros = np.nonzero(self.h_mat[j,:])[0]
-            self.h_nonzero = np.concatenate((self.h_nonzero, nonzeros))
-            self.h_nonzero_secs[j+1] = self.h_nonzero_secs[j] + len(nonzeros)
 
-        i_dim = self.eri_mat.shape[1]
+        if h_mat is not None:
+            assert(self.hilbert.size == h_mat.shape[0] == h_mat.shape[1])
 
-        self.eri_nonzero = np.zeros((0,2), dtype=int)
-        self.eri_nonzero_secs = np.zeros(i_dim*self.eri_mat.shape[3]+1, dtype=int)
+            non_zero = np.sum(h_mat != 0.)
+            self.h_nonzero_inds = np.zeros(non_zero, dtype=int)
+            self.h_nonzero_vals = np.zeros(non_zero, dtype=h_mat.dtype)
+            self.h_nonzero_secs = np.zeros(self.hilbert.size+1, dtype=int)
 
-        for j in range(self.eri_mat.shape[3]):
-            for i in range(i_dim):
-                nonzeros = np.array(np.nonzero(self.eri_mat[:,i,:,j])).T
-                self.eri_nonzero = np.concatenate((self.eri_nonzero, nonzeros), axis=0)
-                self.eri_nonzero_secs[j*i_dim + i + 1] = self.eri_nonzero_secs[j*i_dim + i] + nonzeros.shape[0]
-        self.h_mat_jax = jnp.array(self.h_mat)
-        self.eri_mat_jax = jnp.array(self.eri_mat)
-        self.h_nonzero_jax = jnp.array(self.h_nonzero)
-        self.h_nonzero_secs_jax = jnp.array(self.h_nonzero_secs)
-        self.eri_nonzero_jax = jnp.array(self.eri_nonzero)
-        self.eri_nonzero_secs_jax = jnp.array(self.eri_nonzero_secs)
+            count = 0
+            for j in range(self.hilbert.size):
+                nonzeros = h_mat[j,:].nonzero()[0]
+                self.h_nonzero_inds[count:(count+len(nonzeros))] = nonzeros
+                self.h_nonzero_vals[count:(count+len(nonzeros))] = h_mat[j, nonzeros]
+                self.h_nonzero_secs[j+1] = self.h_nonzero_secs[j] + len(nonzeros)
+                count += len(nonzeros)
+
+            self.h_nonzero_inds = jnp.array(self.h_nonzero_inds)
+            self.h_nonzero_vals = jnp.array(self.h_nonzero_vals)
+            self.h_nonzero_secs = jnp.array(self.h_nonzero_secs)
+        else:
+            self.h_nonzero_inds = None
+            self.h_nonzero_vals = None
+            self.h_nonzero_secs = None
+
+        if eri_mat is not None:
+            assert(self.hilbert.size == eri_mat.shape[0] == eri_mat.shape[1] == eri_mat.shape[2] == eri_mat.shape[3])
+
+            non_zero = np.sum(eri_mat != 0.)
+            self.eri_nonzero_inds = np.zeros((non_zero,2), dtype=int)
+            self.eri_nonzero_vals = np.zeros(non_zero, dtype=eri_mat.dtype)
+            self.eri_nonzero_secs = np.zeros(self.hilbert.size**2+1, dtype=int)
+
+            count = 0
+            for j in range(self.hilbert.size):
+                for i in range(self.hilbert.size):
+                    nonzeros = np.array(eri_mat[:,i,:,j].nonzero()).T
+                    self.eri_nonzero_inds[count:(count+nonzeros.shape[0]), :] = nonzeros
+                    self.eri_nonzero_vals[count:(count+nonzeros.shape[0])] = eri_mat[nonzeros[:,0],i,nonzeros[:,1],j]
+                    self.eri_nonzero_secs[j*self.hilbert.size + i + 1] = self.eri_nonzero_secs[j*self.hilbert.size + i] + nonzeros.shape[0]
+                    count += nonzeros.shape[0]
+
+            self.eri_nonzero_inds = jnp.array(self.eri_nonzero_inds)
+            self.eri_nonzero_vals = jnp.array(self.eri_nonzero_vals)
+            self.eri_nonzero_secs = jnp.array(self.eri_nonzero_secs)
+        else:
+            self.eri_nonzero_inds = None
+            self.eri_nonzero_vals = None
+            self.eri_nonzero_secs = None
 
     """
     This is really only for testing purposes, expectation value automatically
@@ -50,20 +76,22 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
     def get_conn_flattened(self, x, sections, pad=True):
         assert(not pad or self.hilbert._has_constraint)
 
-        x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
-                                                         sections, self.h_mat, self.eri_mat,
-                                                         self.h_nonzero, self.h_nonzero_secs,
-                                                         self.eri_nonzero, self.eri_nonzero_secs)
+        x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8), sections, np.array(self.h_nonzero_vals),
+                                                         np.array(self.h_nonzero_inds), np.array(self.h_nonzero_secs),
+                                                         np.array(self.eri_nonzero_vals), np.array(self.eri_nonzero_inds),
+                                                         np.array(self.eri_nonzero_secs))
 
         return x_primes, mels
 
     @staticmethod
     @jit(nopython=True)
-    def _get_conn_flattened_kernel(x, sections, h, eri, h_nz, h_nz_secs, eri_nz, eri_nz_secs):
+    def _get_conn_flattened_kernel(x, sections, h, h_nz, h_nz_secs, eri, eri_nz, eri_nz_secs):
         range_indices = np.arange(x.shape[-1])
 
         x_prime = np.empty((0, x.shape[1]), dtype=np.uint8)
         mels = np.empty(0, dtype=np.complex128)
+
+        n_orbs = x.shape[-1]
 
         c = 0
         for batch_id in range(x.shape[0]):
@@ -100,7 +128,7 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                     x_prime[c, :] = x[batch_id, :]
                     multiplicator = apply_hopping(i, a, x_prime[c], 1,
                                                   cummulative_count=up_count)
-                    mels[c] = multiplicator * h[i, a]
+                    mels[c] = multiplicator * h[k]
                     c += 1
             for i in down_occ_inds:
                 for k in range(h_nz_secs[i], h_nz_secs[i+1]):
@@ -108,7 +136,7 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                     x_prime[c, :] = x[batch_id, :]
                     multiplicator = apply_hopping(i, a, x_prime[c], 2,
                                                   cummulative_count=down_count)
-                    mels[c] = multiplicator * h[i, a]
+                    mels[c] = multiplicator * h[k]
                     c += 1
 
             # Two body parts
@@ -119,7 +147,7 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                         parity_count_j = (parity_count_i + up_count[j] - 1)
                         if j > i:
                             parity_count_j = parity_count_j - 1
-                        for k in range(eri_nz_secs[j*eri.shape[1]+i], eri_nz_secs[j*eri.shape[1]+i+1]):
+                        for k in range(eri_nz_secs[j*n_orbs+i], eri_nz_secs[j*n_orbs+i+1]):
                             a = eri_nz[k, 1]
                             b = eri_nz[k, 0]
                             parity_count = parity_count_j + up_count[a] + up_count[b]
@@ -140,7 +168,7 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                                     multiplicator *= 0
                                 else:
                                     x_prime[c, b] += 1
-                            mels[c] = 0.5 * multiplicator * eri[b,i,a,j]
+                            mels[c] = 0.5 * multiplicator * eri[k]
                             c += 1
 
             for i in down_occ_inds:
@@ -150,7 +178,7 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                         parity_count_j = (parity_count_i + down_count[j] - 1)
                         if j > i:
                             parity_count_j = parity_count_j - 1
-                        for k in range(eri_nz_secs[j*eri.shape[1]+i], eri_nz_secs[j*eri.shape[1]+i+1]):
+                        for k in range(eri_nz_secs[j*n_orbs+i], eri_nz_secs[j*n_orbs+i+1]):
                             a = eri_nz[k, 1]
                             b = eri_nz[k, 0]
                             parity_count = parity_count_j + down_count[a] + down_count[b]
@@ -171,14 +199,14 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                                     multiplicator *= 0
                                 else:
                                     x_prime[c, b] += 2
-                            mels[c] = 0.5 * multiplicator * eri[b,i,a,j]
+                            mels[c] = 0.5 * multiplicator * eri[k]
                             c += 1
 
             for i in up_occ_inds:
                 parity_count_i = (up_count[i]-1)
                 for j in down_occ_inds:
                     parity_count_j = parity_count_i + down_count[j] - 1
-                    for k in range(eri_nz_secs[j*eri.shape[1]+i], eri_nz_secs[j*eri.shape[1]+i+1]):
+                    for k in range(eri_nz_secs[j*n_orbs+i], eri_nz_secs[j*n_orbs+i+1]):
                         a = eri_nz[k, 1]
                         b = eri_nz[k, 0]
                         parity_count = parity_count_j + down_count[a] + up_count[b]
@@ -199,7 +227,7 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
                                 multiplicator = 0
                             else:
                                 x_prime[c, b] += 1
-                        mels[c] = multiplicator * eri[b,i,a,j]
+                        mels[c] = multiplicator * eri[k]
                         c += 1
             c = end_val
             sections[batch_id] = c
@@ -207,11 +235,14 @@ class AbInitioHamiltonianSparse(AbInitioHamiltonian):
 
 def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
     h = args[0]
-    eri = args[1]
-    h_nonzero = args[2]
-    eri_nonzero = args[3]
-    h_nonzero_secs = args[4]
+    h_nonzero_inds = args[1]
+    h_nonzero_secs = args[2]
+    eri = args[3]
+    eri_nonzero_inds = args[4]
     eri_nonzero_secs = args[5]
+
+    n_orbs = samples.shape[-1]
+
     def vmap_fun(sample):
         is_occ_up = (sample & 1)
         is_occ_down = (sample & 2) >> 1
@@ -284,7 +315,7 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                 # Evaluate amplitude ratio
                 log_amp_connected = get_connected_log_amp(new_occ, update_sites)
                 amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
-                return (h[i, a] * amp_ratio * parity_multiplicator).astype(complex)
+                return (amp_ratio * parity_multiplicator).astype(complex)
             def invalid_hop(_):
                 return 0.j
             return jax.lax.cond((sample[a]&spin_int).astype(bool), invalid_hop, valid_hop, None)
@@ -293,9 +324,9 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
         def outer_loop_occ(arg):
             i = up_occ_inds[arg[0]]
             def inner_loop(arg):
-                a = h_nonzero[arg[0]]
-                value = jax.lax.cond(a != i, compute_connected_1B, lambda _: (h[i, a]).astype(complex), ((i, a), 1, up_count))
-                return (arg[0] + 1, arg[1] + value)
+                a = h_nonzero_inds[arg[0]]
+                value = jax.lax.cond(a != i, compute_connected_1B, lambda _: jnp.array(1., dtype=complex), ((i, a), 1, up_count))
+                return (arg[0] + 1, arg[1] + h[arg[0]] * value)
             def stop_cond(arg):
                 return arg[0] < h_nonzero_secs[i+1]
             value = jax.lax.while_loop(stop_cond, inner_loop, (h_nonzero_secs[i], 0.))[1]
@@ -306,9 +337,9 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
         def outer_loop_occ(arg):
             i = down_occ_inds[arg[0]]
             def inner_loop(arg):
-                a = h_nonzero[arg[0]]
-                value = jax.lax.cond(a != i, compute_connected_1B, lambda _: (h[i, a]).astype(complex), ((i, a), 2, down_count))
-                return (arg[0] + 1, arg[1] + value)
+                a = h_nonzero_inds[arg[0]]
+                value = jax.lax.cond(a != i, compute_connected_1B, lambda _: jnp.array(1., dtype=complex), ((i, a), 2, down_count))
+                return (arg[0] + 1, arg[1] + h[arg[0]] * value)
             def stop_cond(arg):
                 return arg[0] < h_nonzero_secs[i+1]
             value = jax.lax.while_loop(stop_cond, inner_loop, (h_nonzero_secs[i], 0.))[1]
@@ -353,8 +384,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                     parity_count_j -= jnp.array((j > i)*(spin_indices[0] == spin_indices[1]), dtype=int)
                     def compute_inner(_):
                         def inner_loop_unocc(arg):
-                            a = eri_nonzero[arg[0], 1]
-                            b = eri_nonzero[arg[0], 0]
+                            a = eri_nonzero_inds[arg[0], 1]
+                            b = eri_nonzero_inds[arg[0], 0]
                             new_occ_a, valid_a, update_sites_a = update_config(a, update_sites_j, new_occ_j, spin_ints[spin_indices[1]], True)
                             new_occ_b, valid_b, update_sites_b = update_config(b, update_sites_a, new_occ_a, spin_ints[spin_indices[0]], True)
                             valid = jnp.logical_and(valid_a, valid_b)
@@ -379,13 +410,13 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                                 amp_ratio = jax.lax.switch(no_updates, [updates_0, partial(update, 1),
                                                                         partial(update, 2), partial(update, 3),
                                                                         partial(update, 4)], None)
-                                return (eri[b,i,a,j] * amp_ratio * parity_multiplicator).astype(complex)
+                                return (eri[arg[0]] * amp_ratio * parity_multiplicator).astype(complex)
 
                             value = jax.lax.cond(valid, get_val, lambda _: jnp.array(0., dtype=complex), None)
                             return (arg[0] + 1, arg[1] + value)
                         def stop_cond(arg):
-                            return arg[0] < eri_nonzero_secs[j*eri.shape[1]+i+1]
-                        return jax.lax.while_loop(stop_cond, inner_loop_unocc, (eri_nonzero_secs[j*eri.shape[1]+i], 0.))[1]
+                            return arg[0] < eri_nonzero_secs[j*n_orbs+i+1]
+                        return jax.lax.while_loop(stop_cond, inner_loop_unocc, (eri_nonzero_secs[j*n_orbs+i], 0.))[1]
                     value = jax.lax.cond(valid_j, compute_inner, lambda _: jnp.array(0., dtype=complex), None)
                     return (arg[0] + 1, arg[1] + value)
                 value = jax.lax.while_loop(partial(loop_stop_cond, occ_inds[spin_indices[1]]), second_loop_occ, (0, 0.))[1]
@@ -402,8 +433,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 @nk.vqs.get_local_kernel_arguments.dispatch
 def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse):
     samples = vstate.samples
-    return (samples, (op.h_mat_jax, op.eri_mat_jax, op.h_nonzero_jax, op.eri_nonzero_jax,
-                      op.h_nonzero_secs_jax, op.eri_nonzero_secs_jax))
+    return (samples, (op.h_nonzero_vals, op.h_nonzero_inds, op.h_nonzero_secs, op.eri_nonzero_vals,
+                      op.eri_nonzero_inds, op.eri_nonzero_secs))
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse, chunk_size: Optional[int] = None):
