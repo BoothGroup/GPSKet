@@ -16,3 +16,4 @@ from . import models
 from . import nn
 from . import operator
 from . import sampler
+from . import hilbert
