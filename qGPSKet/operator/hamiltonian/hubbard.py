@@ -24,14 +24,10 @@ class FermiHubbard(FermionicDiscreteOperator):
     def dtype(self) -> DType:
         return float
 
+    # pad argument is just a dummy atm -> TODO: improve this!
     def get_conn_flattened(self, x, sections, pad=True):
         x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
                                                          sections, self.U, self.edges, self.t)
-        if not pad:
-            valid = (mels != 0.)
-            x_primes = x_primes[valid, :]
-            mels = mels[valid]
-            sections[-1] = len(mels)
         return x_primes, mels
 
     @staticmethod
@@ -46,8 +42,7 @@ class FermiHubbard(FermionicDiscreteOperator):
             # diagonal element
             x_prime[count, :] = x[batch_id, :]
             mels[count] = U * np.sum(x[batch_id, :] == 3)
-            if mels[count] != 0.:
-                count += 1
+            count += 1
 
             is_occ_up = (x[batch_id] & 1).astype(np.bool8)
             is_occ_down = (x[batch_id] & 2).astype(np.bool8)
@@ -62,26 +57,19 @@ class FermiHubbard(FermionicDiscreteOperator):
                 # spin up
                 x_prime[count, :] = x[batch_id, :]
                 mels[count] = -t[edge_count] * apply_hopping(edge[0], edge[1], x_prime[count], 1, cummulative_count=up_count)
-                if mels[count] != 0.:
-                    count += 1
+                count += 1
                 x_prime[count, :] = x[batch_id, :]
                 mels[count] = -t[edge_count] * apply_hopping(edge[1], edge[0], x_prime[count], 1, cummulative_count=up_count)
-                if mels[count] != 0.:
-                    count += 1
+                count += 1
 
                 # spin down
                 x_prime[count, :] = x[batch_id, :]
                 mels[count] = -t[edge_count] * apply_hopping(edge[0], edge[1], x_prime[count], 2, cummulative_count=down_count)
-                if mels[count] != 0.:
-                    count += 1
+                count += 1
                 x_prime[count, :] = x[batch_id, :]
                 mels[count] = -t[edge_count] * apply_hopping(edge[1], edge[0], x_prime[count], 2, cummulative_count=down_count)
-                if mels[count] != 0.:
-                    count += 1
-            sections[batch_id] = count
+                count += 1
 
-        for l in range(count, n_conn):
-            x_prime[l, :] = x[-1, :]
-            mels[l] = 0.
+                sections[batch_id] = count
         return x_prime, mels
 
