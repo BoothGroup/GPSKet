@@ -14,6 +14,12 @@ class MetropolisFastSampler(MetropolisSampler):
     TODO: here we require some checking if the transition rule also returns the updates.
     """
     def _sample_next(sampler, machine, parameters, state):
+        try:
+            fast_update = machine.apply_fast_update
+        except:
+            fast_update = False
+
+        assert(fast_update)
         """
         Fast implementation of the _sample_next function for qGPS models (allowing for fast updates),
         implementation is based on the original netket implementation for the metropolis sampler.
