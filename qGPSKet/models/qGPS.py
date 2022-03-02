@@ -114,75 +114,52 @@ class qGPS(nn.Module):
     """
     @nn.compact
     def __call__(self, inputs, cache_intermediates=False, update_sites=None):
-        if len(inputs.shape) == 1:
-            inputs = jnp.expand_dims(inputs, 0)
 
         indices = self.to_indices(inputs)
 
         epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, self.L), self.dtype)
 
-        if cache_intermediates or (update_sites is not None and self.apply_fast_update):
+        if cache_intermediates or (update_sites is not None):
             site_product_save = self.variable("intermediates_cache", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
             indices_save = self.variable("intermediates_cache", "samples", lambda : jnp.zeros(0, dtype=indices.dtype))
 
-        if update_sites is not None and not self.apply_fast_update:
-            def update_fun(saved_config, update_sites, occs):
-                return saved_config.value.at[update_sites].set(indices)
-            indices = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
-
-        if update_sites is None or not self.apply_fast_update:
+        if update_sites is None:
             def evaluate_site_product(sample):
                 return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1)
 
-            if cache_intermediates:
-                def outer_sym_batching(site_prod):
-                    return jnp.moveaxis(site_prod, 0, -1)
-                def scan_function(carry, sample):
-                    return (None, evaluate_site_product(sample).reshape(-1))
-            else:
-                def outer_sym_batching(site_prod):
-                    return jnp.sum(self.before_sym_op(site_prod))
-                def scan_function(carry, sample):
-                    return (None, jnp.sum(evaluate_site_product(sample)))
-
-            def get_site_prod_or_val(carry, sample):
-                symmetrically_equivalent_samps = jnp.moveaxis(self.symmetries(sample), -1, 0)
-                value = jax.lax.scan(scan_function, None, symmetrically_equivalent_samps)[1]
-                return (None, outer_sym_batching(value))
+            def get_site_prod(sample):
+                return jax.vmap(evaluate_site_product, in_axes=-1, out_axes=-1)(self.symmetries(sample))
 
             transformed_samples = jnp.expand_dims(indices, (1, 2)) # required for the inner take_along_axis
-            site_prod_or_value = jax.lax.scan(get_site_prod_or_val, None, transformed_samples)[1]
+            site_product = jax.vmap(get_site_prod)(transformed_samples)
         else:
             if len(update_sites.shape) == 1:
                 update_sites = jnp.expand_dims(update_sites, 0)
-            site_prod = site_product_save.value
+
+            site_product_old = site_product_save.value
             new_samples = indices
             old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save.value, update_sites)
 
-            def inner_site_product_update(site_prod, new_occs, old_occs, sites):
-                site_prod_new = site_prod / (epsilon[old_occs,:,sites].prod(axis=0))
+            def inner_site_product_update(site_prod_old, new_occs, old_occs, sites):
+                site_prod_new = site_prod_old / (epsilon[old_occs,:,sites].prod(axis=0))
                 site_prod_new = site_prod_new * (epsilon[new_occs,:,sites].prod(axis=0))
                 return site_prod_new
 
-            def outer_site_product_update(site_product, sample_new, sample_old, update_sites):
+            def outer_site_product_update(site_prod_old, sample_new, sample_old, update_sites):
                 inv_sym_new, inv_sym_sites = self.symmetries_inverse(sample_new, update_sites)
                 inv_sym_old, inv_sym_sites = self.symmetries_inverse(sample_old, update_sites)
 
-                return jax.vmap(inner_site_product_update, in_axes=(-1, -1, -1, -1), out_axes=-1)(site_product, inv_sym_new, inv_sym_old, inv_sym_sites)
+                return jax.vmap(inner_site_product_update, in_axes=(-1, -1, -1, -1), out_axes=-1)(site_prod_old, inv_sym_new, inv_sym_old, inv_sym_sites)
 
-            site_prod_or_value = jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_prod, new_samples, old_samples, update_sites)
+            site_product = jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_product_old, new_samples, old_samples, update_sites)
 
         if cache_intermediates:
-            site_product_save.value = site_prod_or_value
-            if (update_sites is not None and self.apply_fast_update):
+            site_product_save.value = site_product
+            if update_sites is not None:
                 def update_fun(saved_config, update_sites, occs):
                     return saved_config.at[update_sites].set(occs)
                 indices_save.value = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
             else:
                 indices_save.value = indices
 
-        if cache_intermediates or (update_sites is not None and self.apply_fast_update):
-            site_prod_or_value = self.before_sym_op(site_prod_or_value.sum(axis=-2))
-            site_prod_or_value = self.final_op(site_prod_or_value.sum(axis=-1))
-
-        return self.final_op(site_prod_or_value)
+        return self.final_op(self.before_sym_op(site_product.sum(axis=-2)).sum(axis=-1))
