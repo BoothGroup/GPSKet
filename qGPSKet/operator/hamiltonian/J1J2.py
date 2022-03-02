@@ -82,10 +82,10 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
     acting_on = args[1]
     def vmap_fun(sample):
         if use_fast_update:
-            log_amp, intermediates_cache = logpsi(pars, sample, mutable="intermediates_cache", cache_intermediates=True)
+            log_amp, intermediates_cache = logpsi(pars, jnp.expand_dims(sample, 0), mutable="intermediates_cache", cache_intermediates=True)
             parameters = {**pars, **intermediates_cache}
         else:
-            log_amp = logpsi(pars, sample)
+            log_amp = logpsi(pars, jnp.expand_dims(sample, 0))
         def scan_fun(carry, index):
             acting_on_element = acting_on[index]
             operator_element = operators[index]
@@ -96,10 +96,10 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                 mel = operator_element[basis_index, connected_index]
                 new_occ = 2*tensor_basis_mapping[connected_index]-1.
                 if use_fast_update:
-                    log_amp_connected = logpsi(parameters, new_occ, update_sites=acting_on_element)
+                    log_amp_connected = logpsi(parameters, jnp.expand_dims(new_occ, 0), update_sites=jnp.expand_dims(acting_on_element, 0))
                 else:
                     updated_config = sample.at[acting_on_element].set(new_occ)
-                    log_amp_connected = logpsi(pars, updated_config)
+                    log_amp_connected = logpsi(pars, jnp.expand_dims(updated_config, 0))
                 return jnp.squeeze(mel * jnp.exp(log_amp_connected - log_amp)).astype(complex)
             off_diag_index = off_diag_connected[basis_index]
             off_diag = jax.lax.cond(off_diag_index != basis_index, compute_element, lambda x: jnp.array(0, dtype=complex), off_diag_index)

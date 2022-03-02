@@ -283,19 +283,19 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 
         # Compute log_amp of sample
         if use_fast_update:
-            log_amp, intermediates_cache = logpsi(pars, sample, mutable="intermediates_cache", cache_intermediates=True)
+            log_amp, intermediates_cache = logpsi(pars, jnp.expand_dims(sample, 0), mutable="intermediates_cache", cache_intermediates=True)
             parameters = {**pars, **intermediates_cache}
         else:
-            log_amp = logpsi(pars, sample)
+            log_amp = logpsi(pars, jnp.expand_dims(sample, 0))
 
         """ This function returns the log_amp of the connected configuration which is only specified
         by the occupancy on the updated sites as well as the indices of the sites updated."""
         def get_connected_log_amp(updated_occ_partial, update_sites):
             if use_fast_update:
-                log_amp_connected = logpsi(parameters, updated_occ_partial, update_sites=update_sites)
+                log_amp_connected = logpsi(parameters, jnp.expand_dims(updated_occ_partial, 0), update_sites=jnp.expand_dims(update_sites, 0))
             else:
                 updated_config = sample.at[update_sites].set(updated_occ_partial)
-                log_amp_connected = logpsi(pars, updated_config)
+                log_amp_connected = logpsi(pars, jnp.expand_dims(updated_config, 0))
             return log_amp_connected
 
         # Computes term from single electron hop
