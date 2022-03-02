@@ -124,7 +124,7 @@ class qGPS(nn.Module):
 
         if update_sites is None:
             def evaluate_site_product(sample):
-                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1)
+                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1).reshape(-1)
 
             def get_site_prod(sample):
                 return jax.vmap(evaluate_site_product, in_axes=-1, out_axes=-1)(self.symmetries(sample))
@@ -132,9 +132,6 @@ class qGPS(nn.Module):
             transformed_samples = jnp.expand_dims(indices, (1, 2)) # required for the inner take_along_axis
             site_product = jax.vmap(get_site_prod)(transformed_samples)
         else:
-            if len(update_sites.shape) == 1:
-                update_sites = jnp.expand_dims(update_sites, 0)
-
             site_product_old = site_product_save.value
             new_samples = indices
             old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save.value, update_sites)
