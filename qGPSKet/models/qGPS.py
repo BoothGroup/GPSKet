@@ -88,8 +88,7 @@ class qGPS(nn.Module):
     For all returned arrays of the syms function, the last dimension corresponds to the total number of symmetry operations.
     """
     syms: Union[Callable, Tuple[Callable, Callable]] = no_syms()
-    before_sym_op: Callable = lambda argument : argument
-    final_op: Callable = lambda argument : argument
+    out_transformation: Callable = lambda argument : jnp.sum(argument, axis=(-2,-1))
     apply_fast_update: bool = True
 
     def setup(self):
@@ -162,4 +161,4 @@ class qGPS(nn.Module):
             else:
                 indices_save.value = indices
 
-        return self.final_op(self.before_sym_op(site_product.sum(axis=-2)).sum(axis=-1))
+        return self.out_transformation(site_product)
