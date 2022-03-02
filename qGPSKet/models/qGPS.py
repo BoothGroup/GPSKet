@@ -8,6 +8,7 @@ from typing import Tuple, Union
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from qGPSKet.nn.initializers import normal
 
+import warnings
 
 # helper function to get the symmetry transformation functions for spin systems
 def get_sym_transformation_spin(graph, automorphisms=True, spin_flip=True):
@@ -89,20 +90,30 @@ class qGPS(nn.Module):
     syms: Union[Callable, Tuple[Callable, Callable]] = no_syms()
     before_sym_op: Callable = lambda argument : argument
     final_op: Callable = lambda argument : argument
+    apply_fast_update: bool = True
 
     def setup(self):
         if type(self.syms) == tuple:
             self.symmetries = self.syms[0]
             self.symmetries_inverse = self.syms[1]
-            self.fast_update = True
         else:
             self.symmetries = self.syms
-            self.fast_update = False
+            if self.apply_fast_update:
+                warnings.warn("Attention! Fast updating is not applied in qGPS as the inverse symmetry operations are not supplied.")
+            self.apply_fast_update = False
         self.L = self.hilbert.size
         self.local_dim = self.hilbert.local_size
 
+    """
+    Note: It might be cleaner to use the `intermediates` interface provided by flax
+    to cache intermediate values. However, that stacks intermediates from multiple
+    calls by default so these could not be fed back into the model without overwritting
+    this behaviour. In order to avoid this pitfall in the model definition, we thus
+    use our own interface to store intermediate values which can be fed back into the
+    model as variables (as required for fast wavefunction updates).
+    """
     @nn.compact
-    def __call__(self, inputs, save_site_prod=False, update_sites=None):
+    def __call__(self, inputs, cache_intermediates=False, update_sites=None):
         if len(inputs.shape) == 1:
             inputs = jnp.expand_dims(inputs, 0)
 
@@ -110,20 +121,20 @@ class qGPS(nn.Module):
 
         epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, self.L), self.dtype)
 
-        if save_site_prod or (update_sites is not None and self.fast_update):
-            site_product_save = self.variable("workspace", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
-            indices_save = self.variable("workspace", "samples", lambda : jnp.zeros(0, dtype=indices.dtype))
+        if cache_intermediates or (update_sites is not None and self.apply_fast_update):
+            site_product_save = self.variable("intermediates_cache", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
+            indices_save = self.variable("intermediates_cache", "samples", lambda : jnp.zeros(0, dtype=indices.dtype))
 
-        if update_sites is not None and not self.fast_update:
+        if update_sites is not None and not self.apply_fast_update:
             def update_fun(saved_config, update_sites, occs):
                 return saved_config.value.at[update_sites].set(indices)
             indices = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
 
-        if update_sites is None or not self.fast_update:
+        if update_sites is None or not self.apply_fast_update:
             def evaluate_site_product(sample):
                 return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1)
 
-            if save_site_prod:
+            if cache_intermediates:
                 def outer_sym_batching(site_prod):
                     return jnp.moveaxis(site_prod, 0, -1)
                 def scan_function(carry, sample):
@@ -161,16 +172,16 @@ class qGPS(nn.Module):
 
             site_prod_or_value = jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_prod, new_samples, old_samples, update_sites)
 
-        if save_site_prod:
+        if cache_intermediates:
             site_product_save.value = site_prod_or_value
-            if (update_sites is not None and self.fast_update):
+            if (update_sites is not None and self.apply_fast_update):
                 def update_fun(saved_config, update_sites, occs):
                     return saved_config.at[update_sites].set(occs)
                 indices_save.value = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
             else:
                 indices_save.value = indices
 
-        if save_site_prod or (update_sites is not None and self.fast_update):
+        if cache_intermediates or (update_sites is not None and self.apply_fast_update):
             site_prod_or_value = self.before_sym_op(site_prod_or_value.sum(axis=-2))
             site_prod_or_value = self.final_op(site_prod_or_value.sum(axis=-1))
 

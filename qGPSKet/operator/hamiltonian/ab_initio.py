@@ -192,9 +192,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
 also includes another flag specifying if fast updating should be applied or not.
 """
 class AbInitioHamiltonianOnTheFly(AbInitioHamiltonian):
-    def __init__(self, *args, use_fast_update=True):
-        self.use_fast_update = use_fast_update
-        super().__init__(*args)
+    pass
 
 """ Helper function which returns the parity for an electron hop by counting
 how many electrons the hopping electron moves past moved past. Careful!, this
@@ -290,8 +288,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 
         # Compute log_amp of sample
         if use_fast_update:
-            log_amp, workspace = logpsi(pars, sample, mutable="workspace", save_site_prod=True)
-            parameters = {**pars, **workspace}
+            log_amp, intermediates_cache = logpsi(pars, sample, mutable="intermediates_cache", cache_intermediates=True)
+            parameters = {**pars, **intermediates_cache}
         else:
             log_amp = logpsi(pars, sample)
 
@@ -537,5 +535,8 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianOn
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianOnTheFly, chunk_size: Optional[int] = None):
-    use_fast_update = isinstance(vstate.model, qGPS) and op.use_fast_update
+    try:
+        use_fast_update = vstate.model.apply_fast_update
+    except NameError:
+        use_fast_update = False
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)

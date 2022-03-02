@@ -26,7 +26,7 @@ class MetropolisFastSampler(MetropolisSampler):
         with loops.Scope() as s:
             s.key = rng
             s.σ = state.σ
-            value, s.workspace = machine.apply(parameters, state.σ, mutable="workspace", save_site_prod=True)
+            value, s.intermediates_cache = machine.apply(parameters, state.σ, mutable="intermediates_cache", cache_intermediates=True)
             s.log_prob = sampler.machine_pow * value.real
 
             # for logging
@@ -40,9 +40,9 @@ class MetropolisFastSampler(MetropolisSampler):
                     sampler, machine, parameters, state, key1, s.σ
                 )
 
-                params = {**parameters, **s.workspace}
+                params = {**parameters, **s.intermediates_cache}
                 updated_occupancy = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(σp, update_sites)
-                value, new_workspace = machine.apply(params, updated_occupancy, mutable="workspace", save_site_prod=True, update_sites=update_sites)
+                value, new_intermediates_cache = machine.apply(params, updated_occupancy, mutable="intermediates_cache", cache_intermediates=True, update_sites=update_sites)
                 proposal_log_prob = (
                     sampler.machine_pow * value.real
                 )
@@ -58,15 +58,15 @@ class MetropolisFastSampler(MetropolisSampler):
                 # do_accept must match ndim of proposal and state (which is 2)
                 s.σ = jnp.where(do_accept.reshape(-1, 1), σp, s.σ)
 
-                site_product_old = s.workspace["workspace"]["site_prod"]
-                site_product_new = new_workspace["workspace"]["site_prod"]
-                samples_old = s.workspace["workspace"]["samples"]
-                samples_new = new_workspace["workspace"]["samples"]
+                site_product_old = s.intermediates_cache["intermediates_cache"]["site_prod"]
+                site_product_new = new_intermediates_cache["intermediates_cache"]["site_prod"]
+                samples_old = s.intermediates_cache["intermediates_cache"]["samples"]
+                samples_new = new_intermediates_cache["intermediates_cache"]["samples"]
 
                 site_product_updated = jnp.where(do_accept.reshape(-1,1,1), site_product_new, site_product_old)
                 samples_updated = jnp.where(do_accept.reshape(-1,1), samples_new, samples_old)
 
-                s.workspace = {"workspace": {"site_prod": site_product_updated, "samples": samples_updated}}
+                s.intermediates_cache = {"intermediates_cache": {"site_prod": site_product_updated, "samples": samples_updated}}
 
                 s.accepted += do_accept.sum()
 

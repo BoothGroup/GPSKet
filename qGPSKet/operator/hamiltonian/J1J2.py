@@ -82,8 +82,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
     acting_on = args[1]
     def vmap_fun(sample):
         if use_fast_update:
-            log_amp, workspace = logpsi(pars, sample, mutable="workspace", save_site_prod=True)
-            parameters = {**pars, **workspace}
+            log_amp, intermediates_cache = logpsi(pars, sample, mutable="intermediates_cache", cache_intermediates=True)
+            parameters = {**pars, **intermediates_cache}
         else:
             log_amp = logpsi(pars, sample)
         def scan_fun(carry, index):
@@ -118,5 +118,8 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly):
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly, chunk_size: Optional[int] = None):
-    use_fast_update = isinstance(vstate.model, qGPS)
+    try:
+        use_fast_update = vstate.model.apply_fast_update
+    except NameError:
+        use_fast_update = False
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)

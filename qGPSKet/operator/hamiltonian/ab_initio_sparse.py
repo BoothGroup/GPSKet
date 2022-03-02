@@ -16,9 +16,8 @@ from qGPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
 from qGPSKet.models import qGPS
 
 class AbInitioHamiltonianSparse(AbInitioHamiltonian):
-    def __init__(self, hilbert, h_mat, eri_mat, use_fast_update=True):
+    def __init__(self, hilbert, h_mat, eri_mat):
         super(AbInitioHamiltonian, self).__init__(hilbert)
-        self.use_fast_update = use_fast_update
 
         if h_mat is not None:
             assert(self.hilbert.size == h_mat.shape[0] == h_mat.shape[1])
@@ -284,8 +283,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 
         # Compute log_amp of sample
         if use_fast_update:
-            log_amp, workspace = logpsi(pars, sample, mutable="workspace", save_site_prod=True)
-            parameters = {**pars, **workspace}
+            log_amp, intermediates_cache = logpsi(pars, sample, mutable="intermediates_cache", cache_intermediates=True)
+            parameters = {**pars, **intermediates_cache}
         else:
             log_amp = logpsi(pars, sample)
 
@@ -438,5 +437,8 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSp
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse, chunk_size: Optional[int] = None):
-    use_fast_update = isinstance(vstate.model, qGPS) and op.use_fast_update
+    try:
+        use_fast_update = vstate.model.apply_fast_update
+    except NameError:
+        use_fast_update = False
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)
