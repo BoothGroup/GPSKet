@@ -122,4 +122,5 @@ class PlaquetteqGPS(nn.Module):
             else:
                 indices_save.value = indices
 
+        # site_product has dim N_batch x number of plaquettes x M x Number of syms
         return self.out_transformation(site_product)
