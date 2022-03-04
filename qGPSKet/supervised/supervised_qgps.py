@@ -33,9 +33,8 @@ class QGPSLearning():
         else:
             self.alpha_mat = np.ones((epsilon.shape[-1], self.local_dim*epsilon.shape[1]))*init_alpha
 
-        self.alpha_cutoff = 1.e10
+        self.alpha_cutoff = 1.e15
         self.kern_cutoff = 1.e-15
-        self.sinv_fallback = True
         self.alpha_convergence_tol = 1.e-15
 
     @staticmethod
@@ -88,7 +87,6 @@ class QGPSLearning():
 
     def set_kernel_mat(self, confs, update_K=False):
         assert(self.ref_site is not None)
-        # print(np.sum(self.confs != confs))
         if self.site_prod is None or self.confs is None or np.sum(self.confs != confs) != 0:
             self.confs = confs
             self.compute_site_prod()
@@ -167,6 +165,15 @@ class QGPSLearning():
         if weightings is not None:
             errors *= weightings
         return _MPI_comm.allreduce(np.sum(errors))
+
+    def update_epsilon_with_weights(self):
+        weights = np.where(self.valid_kern, self.weights, (self.epsilon[:, :, self.ref_site]).T.flatten())
+        # weights = self.weights
+        self.epsilon[:, :, self.ref_site] = weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            self.epsilon[:, :, self.ref_site] += 1.j * weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+
 
 
 class QGPSLearningExp(QGPSLearning):
@@ -350,10 +357,7 @@ class QGPSLearningExp(QGPSLearning):
         if opt_alpha:
             self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
 
-        self.epsilon[:, :, ref_site] = self.weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, :, ref_site] += 1.j * self.weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+        self.update_epsilon_with_weights()
         return
 
     '''
@@ -482,9 +486,6 @@ class QGPSLearningExp(QGPSLearning):
             self.update_precisions(s, q, S, Q)
             self.setup_fit_alpha_dep()
 
-        self.epsilon[:, :, self.ref_site] = self.weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, :, self.ref_site] += 1.j * self.weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+        self.update_epsilon_with_weights()
 
         return
