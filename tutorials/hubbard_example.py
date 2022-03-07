@@ -1,3 +1,5 @@
+import jax
+import jax.numpy as jnp
 import netket as nk
 from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 from qGPSKet.sampler.fermionic_hopping import MetropolisHopping
@@ -22,7 +24,10 @@ sa = MetropolisHopping(hi, n_chains_per_rank=1)
 
 # Define the model and the variational state
 n_dets = 2
-model = ASymmqGPS(hi, n_dets)
+symmetries = g.automorphisms().to_array().T
+def apply_symmetries(y):
+    return jax.vmap(lambda tau: jnp.take(tau, y), in_axes=-1, out_axes=-1)(symmetries)
+model = ASymmqGPS(hi, n_dets, apply_symmetries=apply_symmetries)
 vs = nk.vqs.MCState(sa, model, n_samples=300)
 
 # Optimizer
