@@ -8,70 +8,18 @@ from typing import Tuple, Union
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from qGPSKet.nn.initializers import normal
 
+from qGPSKet.models.qGPS import no_syms
+
+
 import warnings
 
-# helper function to get the symmetry transformation functions for spin systems
-def get_sym_transformation_spin(graph, automorphisms=True, spin_flip=True):
-    if automorphisms:
-        syms = graph.automorphisms().to_array().T
-        inv_syms = np.zeros(syms.shape, dtype=syms.dtype)
-        for i in range(syms.shape[0]):
-            for j in range(syms.shape[1]):
-                inv_syms[syms[i,j], j] = i
-        syms = jnp.array(syms)
-        inv_syms = jnp.array(inv_syms)
-        if spin_flip:
-            def symmetries(samples):
-                out = jnp.take(samples, syms, axis=-1)
-                out = jnp.concatenate((out, 1-out), axis=-1)
-                return out
-            def inv_symmetries(sample_at_indices, indices):
-                inv_sym_sites = jnp.concatenate((inv_syms[indices], inv_syms[indices]), axis=-1)
-                inv_sym_occs = jnp.tile(jnp.expand_dims(sample_at_indices, axis=-1), syms.shape[1])
-                inv_sym_occs = jnp.concatenate((inv_sym_occs, 1-inv_sym_occs), axis=-1)
-                return inv_sym_occs, inv_sym_sites
 
-        else:
-            def symmetries(samples):
-                out = jnp.take(samples, syms, axis=-1)
-                return out
-            def inv_symmetries(sample_at_indices, indices):
-                inv_sym_sites = inv_syms[indices]
-                inv_sym_occs = jnp.tile(jnp.expand_dims(sample_at_indices, axis=-1), syms.shape[1])
-                return inv_sym_occs, inv_sym_sites
-    else:
-        if spin_flip:
-            def symmetries(samples):
-                out = jnp.expand_dims(samples, axis=-1)
-                out = jnp.concatenate((out, 1-out), axis=-1)
-                return out
-            def inv_symmetries(sample_at_indices, indices):
-                inv_sym_sites = jnp.expand_dims(indices, axis=-1)
-                inv_sym_sites = jnp.concatenate((inv_sym_sites, inv_sym_sites), axis=-1)
-                inv_sym_occs = jnp.expand_dims(sample_at_indices, axis=-1)
-                inv_sym_occs = jnp.concatenate((inv_sym_occs, 1-inv_sym_occs), axis=-1)
-                return inv_sym_occs, inv_sym_sites
-        else:
-            def symmetries(samples):
-                out = jnp.expand_dims(samples, axis=-1)
-                return out
-            def inv_symmetries(sample_at_indices, indices):
-                inv_sym_sites = jnp.expand_dims(indices, axis=-1)
-                inv_sym_occs = jnp.expand_dims(sample_at_indices, axis=-1)
-                return inv_sym_occs, inv_sym_sites
-    return (symmetries, inv_symmetries)
-
-# default syms function (no symmetries)
-def no_syms():
-    symmetries = lambda samples : jnp.expand_dims(samples, axis=-1)
-    inv_sym = lambda sample_at_indices, indices : (jnp.expand_dims(sample_at_indices, axis=-1), jnp.expand_dims(indices, axis=-1))
-    return (symmetries, inv_sym)
-
-# TODO: the framework for the symmetrisation could (and should) definitely be improved at one point
-class qGPS(nn.Module):
+# TODO: Improve symmetrisation framework (same as for qGPS)
+class PlaquetteqGPS(nn.Module):
     # TODO: add documentation
     hilbert: HomogeneousHilbert
     M: int
+    plaquettes: HashableArray
     dtype: DType = jnp.complex128
     init_fun: NNInitFunc = normal(dtype=dtype)
     to_indices: Callable = lambda samples : samples.astype(jnp.uint8)
@@ -88,7 +36,7 @@ class qGPS(nn.Module):
     For all returned arrays of the syms function, the last dimension corresponds to the total number of symmetry operations.
     """
     syms: Union[Callable, Tuple[Callable, Callable]] = no_syms()
-    out_transformation: Callable = lambda argument : jnp.sum(argument, axis=(-2,-1))
+    out_transformation: Callable = lambda argument : jnp.sum(argument, axis=(-3,-2,-1))
     apply_fast_update: bool = True
 
     def setup(self):
@@ -102,6 +50,13 @@ class qGPS(nn.Module):
             self.apply_fast_update = False
         self.L = self.hilbert.size
         self.local_dim = self.hilbert.local_size
+        plaquettes = np.array(self.plaquettes)
+        inv_plaquette_ids = -1 * np.ones((plaquettes.shape[0], self.L), dtype=int)
+        for i in range(inv_plaquette_ids.shape[0]):
+            for j in range(plaquettes.shape[1]):
+                inv_plaquette_ids[i, plaquettes[i,j]] = j
+        self.inv_plaquette_ids = HashableArray(inv_plaquette_ids)
+
 
     """
     Note: It might be cleaner to use the `intermediates` interface provided by flax
@@ -113,10 +68,12 @@ class qGPS(nn.Module):
     """
     @nn.compact
     def __call__(self, inputs, cache_intermediates=False, update_sites=None):
-
         indices = self.to_indices(inputs)
 
-        epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, self.L), self.dtype)
+        epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.plaquettes.shape[0], self.M, self.plaquettes.shape[1]), self.dtype)
+
+        plaquettes = np.asarray(self.plaquettes)
+        inv_plaquette_ids = np.asarray(self.inv_plaquette_ids)
 
         if cache_intermediates or (update_sites is not None):
             site_product_save = self.variable("intermediates_cache", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
@@ -124,7 +81,10 @@ class qGPS(nn.Module):
 
         if update_sites is None:
             def evaluate_site_product(sample):
-                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1).reshape(-1)
+                def single_plaquette_eval(plaquette_ids, epsi):
+                    result = jnp.take_along_axis(epsi, sample[:,:,plaquette_ids], axis=0).prod(axis=-1)
+                    return result.reshape(-1)
+                return jax.vmap(single_plaquette_eval, in_axes=(0, 1), out_axes=0)(plaquettes, epsilon)
 
             def get_site_prod(sample):
                 return jax.vmap(evaluate_site_product, in_axes=-1, out_axes=-1)(self.symmetries(sample))
@@ -137,9 +97,13 @@ class qGPS(nn.Module):
             old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save.value, update_sites)
 
             def inner_site_product_update(site_prod_old, new_occs, old_occs, sites):
-                site_prod_new = site_prod_old / (epsilon[old_occs,:,sites].prod(axis=0))
-                site_prod_new = site_prod_new * (epsilon[new_occs,:,sites].prod(axis=0))
-                return site_prod_new
+                def single_plaquette_update(sp_old, epsi, inv_plaquette):
+                    transformed_sites = inv_plaquette[sites]
+                    valid_elements = transformed_sites != -1
+                    update = jnp.where(jnp.expand_dims(valid_elements,1), x=epsi[new_occs, :, transformed_sites], y=1.).prod(axis=0)
+                    update /= jnp.where(jnp.expand_dims(valid_elements,1), x=epsi[old_occs, :, transformed_sites], y=1.).prod(axis=0)
+                    return sp_old * update
+                return jax.vmap(single_plaquette_update, in_axes=(0, 1, 0), out_axes=0)(site_prod_old, epsilon, inv_plaquette_ids)
 
             def outer_site_product_update(site_prod_old, sample_new, sample_old, update_sites):
                 inv_sym_new, inv_sym_sites = self.symmetries_inverse(sample_new, update_sites)
@@ -158,4 +122,5 @@ class qGPS(nn.Module):
             else:
                 indices_save.value = indices
 
+        # site_product has dim N_batch x number of plaquettes x M x Number of syms
         return self.out_transformation(site_product)

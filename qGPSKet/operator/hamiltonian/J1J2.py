@@ -12,37 +12,17 @@ from typing import Optional
 class HeisenbergOnTheFly(nk.operator.Heisenberg):
     pass
 
-def edges_2D(Lx, Ly, next_neighbours=True):
-    edges = []
-    for i in range(Ly):
-        for j in range(Lx):
-            edges.append([i * Lx + j, i * Lx + (j+1)%Lx, 0])
-            edges.append([i * Lx + j, ((i+1)%Ly) * Lx + j, 0])
-            if next_neighbours:
-                edges.append([i * Lx + j, ((i+1)%Ly) * Lx + (j+1)%Lx, 1])
-                edges.append([i * Lx + j, ((i+1)%Ly) * Lx + (j-1)%Lx, 1])
-    return edges
-
-def edges_1D(L, next_neighbours=True):
-    edges = []
-    for i in range(L):
-        edges.append([i, (i + 1)%L, 0])
-        if next_neighbours:
-            edges.append([i, (i + 2)%L, 1])
-    return edges
-
 def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True, total_sz=0.0, on_the_fly_en=False):
     if J2 != 0.:
-        next_neighbours = True
+        nb_order = 2
     else:
-        next_neighbours = False
+        nb_order = 1
 
     if Ly is None:
-        edges = edges_1D(Lx, next_neighbours=next_neighbours)
+        g = nk.graph.Chain(Lx, max_neighbor_order=nb_order)
     else:
-        edges = edges_2D(Lx, Ly, next_neighbours=next_neighbours)
+        g = nk.graph.Grid([Lx, Ly], max_neighbor_order=nb_order)
 
-    g = nk.graph.Graph(edges=edges)
     hilbert = nk.hilbert.Spin(0.5, total_sz=total_sz, N=g.n_nodes)
 
     """
@@ -82,10 +62,10 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
     acting_on = args[1]
     def vmap_fun(sample):
         if use_fast_update:
-            log_amp, workspace = logpsi(pars, sample, mutable="workspace", save_site_prod=True)
-            parameters = {**pars, **workspace}
+            log_amp, intermediates_cache = logpsi(pars, jnp.expand_dims(sample, 0), mutable="intermediates_cache", cache_intermediates=True)
+            parameters = {**pars, **intermediates_cache}
         else:
-            log_amp = logpsi(pars, sample)
+            log_amp = logpsi(pars, jnp.expand_dims(sample, 0))
         def scan_fun(carry, index):
             acting_on_element = acting_on[index]
             operator_element = operators[index]
@@ -96,10 +76,10 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                 mel = operator_element[basis_index, connected_index]
                 new_occ = 2*tensor_basis_mapping[connected_index]-1.
                 if use_fast_update:
-                    log_amp_connected = logpsi(parameters, new_occ, update_sites=acting_on_element)
+                    log_amp_connected = logpsi(parameters, jnp.expand_dims(new_occ, 0), update_sites=jnp.expand_dims(acting_on_element, 0))
                 else:
                     updated_config = sample.at[acting_on_element].set(new_occ)
-                    log_amp_connected = logpsi(pars, updated_config)
+                    log_amp_connected = logpsi(pars, jnp.expand_dims(updated_config, 0))
                 return jnp.squeeze(mel * jnp.exp(log_amp_connected - log_amp)).astype(complex)
             off_diag_index = off_diag_connected[basis_index]
             off_diag = jax.lax.cond(off_diag_index != basis_index, compute_element, lambda x: jnp.array(0, dtype=complex), off_diag_index)
@@ -118,5 +98,8 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly):
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly, chunk_size: Optional[int] = None):
-    use_fast_update = isinstance(vstate.model, qGPS)
+    try:
+        use_fast_update = vstate.model.apply_fast_update
+    except NameError:
+        use_fast_update = False
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)

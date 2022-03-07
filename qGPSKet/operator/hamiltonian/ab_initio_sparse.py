@@ -16,9 +16,8 @@ from qGPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
 from qGPSKet.models import qGPS
 
 class AbInitioHamiltonianSparse(AbInitioHamiltonian):
-    def __init__(self, hilbert, h_mat, eri_mat, use_fast_update=True):
+    def __init__(self, hilbert, h_mat, eri_mat):
         super(AbInitioHamiltonian, self).__init__(hilbert)
-        self.use_fast_update = use_fast_update
 
         if h_mat is not None:
             assert(self.hilbert.size == h_mat.shape[0] == h_mat.shape[1])
@@ -284,19 +283,19 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 
         # Compute log_amp of sample
         if use_fast_update:
-            log_amp, workspace = logpsi(pars, sample, mutable="workspace", save_site_prod=True)
-            parameters = {**pars, **workspace}
+            log_amp, intermediates_cache = logpsi(pars, jnp.expand_dims(sample, 0), mutable="intermediates_cache", cache_intermediates=True)
+            parameters = {**pars, **intermediates_cache}
         else:
-            log_amp = logpsi(pars, sample)
+            log_amp = logpsi(pars, jnp.expand_dims(sample, 0))
 
         """ This function returns the log_amp of the connected configuration which is only specified
         by the occupancy on the updated sites as well as the indices of the sites updated."""
         def get_connected_log_amp(updated_occ_partial, update_sites):
             if use_fast_update:
-                log_amp_connected = logpsi(parameters, updated_occ_partial, update_sites=update_sites)
+                log_amp_connected = logpsi(parameters, jnp.expand_dims(updated_occ_partial, 0), update_sites=jnp.expand_dims(update_sites, 0))
             else:
                 updated_config = sample.at[update_sites].set(updated_occ_partial)
-                log_amp_connected = logpsi(pars, updated_config)
+                log_amp_connected = logpsi(pars, jnp.expand_dims(updated_config, 0))
             return log_amp_connected
 
         # Computes term from single electron hop
@@ -438,5 +437,8 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSp
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse, chunk_size: Optional[int] = None):
-    use_fast_update = isinstance(vstate.model, qGPS) and op.use_fast_update
+    try:
+        use_fast_update = vstate.model.apply_fast_update
+    except NameError:
+        use_fast_update = False
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)

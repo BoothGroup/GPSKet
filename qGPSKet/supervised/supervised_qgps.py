@@ -34,8 +34,7 @@ class QGPSLearning():
             self.alpha_mat = np.ones((epsilon.shape[-1], self.local_dim*epsilon.shape[1]))*init_alpha
 
         self.alpha_cutoff = 1.e10
-        self.kern_cutoff = 1.e-15
-        self.sinv_fallback = True
+        self.kern_cutoff = 1.e-10
         self.alpha_convergence_tol = 1.e-15
 
     @staticmethod
@@ -88,7 +87,6 @@ class QGPSLearning():
 
     def set_kernel_mat(self, confs, update_K=False):
         assert(self.ref_site is not None)
-        # print(np.sum(self.confs != confs))
         if self.site_prod is None or self.confs is None or np.sum(self.confs != confs) != 0:
             self.confs = confs
             self.compute_site_prod()
@@ -121,6 +119,8 @@ class QGPSLearning():
         if np.sum(self.active_elements) > 0:
             self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
             weights = self.Sinv.dot(self.y[self.active_elements])
+        else:
+            self.Sinv = np.zeros((0,0))
 
         if self.weights is None:
             if not self.complex_expand and self.epsilon.dtype==complex:
@@ -167,6 +167,15 @@ class QGPSLearning():
         if weightings is not None:
             errors *= weightings
         return _MPI_comm.allreduce(np.sum(errors))
+
+    def update_epsilon_with_weights(self):
+        weights = np.where(self.valid_kern, self.weights, (self.epsilon[:, :, self.ref_site]).T.flatten())
+        # weights = self.weights
+        self.epsilon[:, :, self.ref_site] = weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            self.epsilon[:, :, self.ref_site] += 1.j * weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+
 
 
 class QGPSLearningExp(QGPSLearning):
@@ -289,22 +298,25 @@ class QGPSLearningExp(QGPSLearning):
             if j >= max_iterations:
                 converged = True
         while not converged:
-            if self.complex_expand and self.epsilon.dtype==complex:
-                gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*0.5*np.diag(self.Sinv).real)
-            else:
-                gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*np.diag(self.Sinv).real)
-            if rvm:
-                self.alpha_mat[self.ref_site, self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
-            else:
-                self.alpha_mat[self.ref_site, self.active_elements] = ((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real)
-            self.setup_fit_alpha_dep()
-            j += 1
-            if np.sum(abs(self.alpha_mat[self.ref_site, :] - alpha_old)**2) < self.alpha_convergence_tol:
+            if not np.max(self.active_elements):
                 converged = True
-            np.copyto(alpha_old, self.alpha_mat[self.ref_site, :])
-            if max_iterations is not None:
-                if j >= max_iterations:
+            else:
+                if self.complex_expand and self.epsilon.dtype==complex:
+                    gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*0.5*np.diag(self.Sinv).real)
+                else:
+                    gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*np.diag(self.Sinv).real)
+                if rvm:
+                    self.alpha_mat[self.ref_site, self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
+                else:
+                    self.alpha_mat[self.ref_site, self.active_elements] = ((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real)
+                self.setup_fit_alpha_dep()
+                j += 1
+                if np.sum(abs(self.alpha_mat[self.ref_site, :] - alpha_old)**2) < self.alpha_convergence_tol:
                     converged = True
+                np.copyto(alpha_old, self.alpha_mat[self.ref_site, :])
+                if max_iterations is not None:
+                    if j >= max_iterations:
+                        converged = True
 
     def fit_step(self, confset, target_amplitudes, ref_site, noise_bounds=[(None, None)],
                  opt_alpha=True, opt_noise=True, max_alpha_iterations=None, max_noise_iterations=None, rvm=False,
@@ -350,10 +362,7 @@ class QGPSLearningExp(QGPSLearning):
         if opt_alpha:
             self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
 
-        self.epsilon[:, :, ref_site] = self.weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, :, ref_site] += 1.j * self.weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+        self.update_epsilon_with_weights()
         return
 
     '''
@@ -482,9 +491,6 @@ class QGPSLearningExp(QGPSLearning):
             self.update_precisions(s, q, S, Q)
             self.setup_fit_alpha_dep()
 
-        self.epsilon[:, :, self.ref_site] = self.weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, :, self.ref_site] += 1.j * self.weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+        self.update_epsilon_with_weights()
 
         return
