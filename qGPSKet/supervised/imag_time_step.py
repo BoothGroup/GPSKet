@@ -20,6 +20,6 @@ class ImagTimeStep():
 
     def log_imag_time_step(self, tau, samples):
         samples_reshaped = samples.reshape((-1, samples.shape[-1]))
-        log_amps = self.vstate.log_value(samples_reshaped)
-        loc_ens = self.get_local_energies(samples_reshaped)
-        return log_amps + jnp.log(1 - tau * loc_ens)
+        self.log_amps = self.vstate.log_value(samples_reshaped)
+        self.local_energies = self.get_local_energies(samples_reshaped)
+        return self.log_amps + jnp.log(1 - tau * self.local_energies)
