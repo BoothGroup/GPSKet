@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from netket.hilbert.homogeneous import HomogeneousHilbert
-from netket.utils.types import Array, Callable
-from ..nn import SlaterDeterminant
+from netket.utils.types import Array, Callable, DType, NNInitFunc
+from ..nn import SlaterDeterminant, normal
 
 
 def occupancies_to_electrons(x, n_elec):
@@ -18,6 +18,8 @@ def occupancies_to_electrons(x, n_elec):
 class ASymmqGPS(nn.Module):
     hilbert: HomogeneousHilbert
     n_determinants: int
+    dtype: DType = jnp.complex128
+    init_fun : NNInitFunc = normal(dtype=dtype)
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     symmetrization: str = 'kernel'
 
@@ -33,7 +35,12 @@ class ASymmqGPS(nn.Module):
 
     def setup(self):
         self._determinants = [
-            SlaterDeterminant(self.hilbert.size, self.hilbert._n_elec) for _ in range(self.n_determinants)
+            SlaterDeterminant(
+                self.hilbert.size,
+                self.hilbert._n_elec,
+                dtype=self.dtype,
+                init_fun=self.init_fun
+            ) for _ in range(self.n_determinants)
         ]
 
     def __call__(self, x) -> Array:
@@ -80,6 +87,8 @@ class ASymmqGPS(nn.Module):
 class ASymmqGPSProd(nn.Module):
     hilbert: HomogeneousHilbert
     n_determinants: int
+    dtype: DType = jnp.complex128
+    init_fun : NNInitFunc = normal(dtype=dtype)
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
 
 
@@ -95,7 +104,12 @@ class ASymmqGPSProd(nn.Module):
     def setup(self):
         assert self.n_determinants % 2 != 0
         self._determinants = [
-            SlaterDeterminant(self.hilbert.size, self.hilbert._n_elec) for _ in range(self.n_determinants)
+            SlaterDeterminant(
+                self.hilbert.size,
+                self.hilbert._n_elec,
+                dtype=self.dtype,
+                init_fun=self.init_fun
+            ) for _ in range(self.n_determinants)
         ]
 
     def __call__(self, x) -> Array:

@@ -2,14 +2,15 @@ import jax.numpy as jnp
 import numpy as np
 from flax import linen as nn
 from typing import Tuple
-from netket.utils.types import Array, Callable
+from netket.utils.types import Array, Callable, DType
 from qGPSKet.nn import normal
 
 
 class SlaterDeterminant(nn.Module):
     n_sites: int
     n_elec: Tuple[int, int]
-    init_fun: Callable=normal(sigma=0.1, dtype=jnp.float64)
+    dtype: DType = jnp.complex128
+    init_fun: Callable = normal(dtype=dtype)
 
     @nn.compact
     def __call__(self, x) -> Array:
