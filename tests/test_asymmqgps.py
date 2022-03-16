@@ -46,3 +46,12 @@ ma = ASymmqGPS(
 )
 log_psi = ma.apply(variables, x)
 assert log_psi.shape == (B,)
+
+# Test #5: evaluate multi-determinant model with projective symmetrization
+ma = ASymmqGPS(
+    hi, n_dets,
+    apply_symmetries=apply_symmetries,
+    symmetrization='projective'
+)
+log_psi_test = ma.apply(variables, x)
+assert log_psi.shape == (B,)

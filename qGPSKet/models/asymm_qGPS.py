@@ -19,6 +19,7 @@ class ASymmqGPS(nn.Module):
     hilbert: HomogeneousHilbert
     n_determinants: int
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    symmetrization: str = 'kernel'
 
 
     # Dimensions:
@@ -27,6 +28,7 @@ class ASymmqGPS(nn.Module):
     # - N = total number of electrons
     # - N_up = number of spin-up electrons
     # - N_down = number of spin-down electrons
+    # - M = number of determinants
     # - T = number of symmetries
 
     def setup(self):
@@ -51,13 +53,26 @@ class ASymmqGPS(nn.Module):
         # Apply symmetry transformations
         y = self.apply_symmetries(y) # (B, N, T)
 
-        # Compute Slater determinants
-        sd = jnp.zeros(x.shape[0])
-        for i in range(self.n_determinants):
-            log_sd_i = jax.vmap(self._determinants[i], in_axes=-1, out_axes=-1)(y) # (B, T)
-            sd = sd + jnp.sum(jnp.exp(log_sd_i), axis=-1)
+        if self.symmetrization == 'kernel':
+            # Evaluate Slater determinants
+            sd = jnp.zeros(x.shape[0])
+            for i in range(self.n_determinants):
+                log_sd_i = jax.vmap(self._determinants[i], in_axes=-1, out_axes=-1)(y) # (B, T)
+                sd = sd + jnp.sum(jnp.exp(log_sd_i), axis=-1)
 
-        # Compute log amplitudes
-        log_psi = jnp.log(jnp.sinh(sd)) #(B,)
+            # Compute log amplitudes
+            log_psi = jnp.log(jnp.sinh(sd)) #(B,)
+        elif self.symmetrization == 'projective':
+            # Evaluate Slater determinants
+            def evaluate_determinants(y_t):
+                sd_t = jnp.zeros(x.shape[0])
+                for i in range(self.n_determinants):
+                    log_sd_i = self._determinants[i](y_t)
+                    sd_t = sd_t + jnp.exp(log_sd_i)
+                return jnp.sinh(sd_t) # (B,)
+            sd = jax.vmap(evaluate_determinants, in_axes=-1, out_axes=-1)(y) # (B, T)
+
+            # Compute log amplitudes
+            log_psi = jnp.log(jnp.sum(sd, axis=-1)) # (B,)
 
         return log_psi

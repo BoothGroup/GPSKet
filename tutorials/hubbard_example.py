@@ -27,13 +27,13 @@ n_dets = 2
 symmetries = g.automorphisms().to_array().T
 def apply_symmetries(y):
     return jax.vmap(lambda tau: jnp.take(tau, y), in_axes=-1, out_axes=-1)(symmetries)
-model = ASymmqGPS(hi, n_dets, apply_symmetries=apply_symmetries)
+model = ASymmqGPS(hi, n_dets, apply_symmetries=apply_symmetries, symmetrization='projective')
 vs = nk.vqs.MCState(sa, model, n_samples=300)
 
 # Optimizer
-op = nk.optimizer.Sgd(learning_rate=0.02)
-qgt = nk.optimizer.qgt.QGTJacobianDense(holomorphic=True)
-sr = nk.optimizer.SR(qgt=qgt)
+op = nk.optimizer.Sgd(learning_rate=0.01)
+qgt = nk.optimizer.qgt.QGTJacobianDense()
+sr = nk.optimizer.SR(qgt=qgt, diag_shift=0.01)
 
 # Variational Monte Carlo driver
 gs = nk.VMC(ha, op, variational_state=vs, preconditioner=sr)
