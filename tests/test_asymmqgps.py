@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import netket as nk
-from qGPSKet.models import ASymmqGPS
+from qGPSKet.models import ASymmqGPS, ASymmqGPSProd
 from qGPSKet.hilbert import FermionicDiscreteHilbert
 
 
@@ -53,5 +53,26 @@ ma = ASymmqGPS(
     apply_symmetries=apply_symmetries,
     symmetrization='projective'
 )
-log_psi_test = ma.apply(variables, x)
 assert log_psi.shape == (B,)
+
+# Test #6: evaluate multi-determinant model with product over determinants
+n_dets = 3
+ma = ASymmqGPSProd(
+    hi, n_dets,
+    apply_symmetries=apply_symmetries,
+)
+variables = ma.init(key_ma, x)
+log_psi = ma.apply(variables, x)
+assert log_psi.shape == (B,)
+
+# Test #7: multi-determinant model with product over determinants should only
+# work for odd numbers of determinants
+n_dets = 2
+ma = ASymmqGPSProd(
+    hi, n_dets,
+    apply_symmetries=apply_symmetries,
+)
+try:
+    variables = ma.init(key_ma, x)
+except Exception as error:
+    assert isinstance(error, AssertionError)
