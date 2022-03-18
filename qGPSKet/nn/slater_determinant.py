@@ -10,7 +10,7 @@ class SlaterDeterminant(nn.Module):
     n_sites: int
     n_elec: Tuple[int, int]
     dtype: DType = jnp.complex128
-    init_fun: Callable = normal(dtype=dtype)
+    init_fun: Callable = normal()
 
     @nn.compact
     def __call__(self, x) -> Array:

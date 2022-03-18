@@ -73,7 +73,7 @@ class qGPS(nn.Module):
     hilbert: HomogeneousHilbert
     M: int
     dtype: DType = jnp.complex128
-    init_fun: NNInitFunc = normal(dtype=dtype)
+    init_fun: NNInitFunc = normal()
     to_indices: Callable = lambda samples : samples.astype(jnp.uint8)
     """
     syms is a tuple of two function representing the symmetry operations.

@@ -19,7 +19,7 @@ class ASymmqGPS(nn.Module):
     hilbert: HomogeneousHilbert
     n_determinants: int
     dtype: DType = jnp.complex128
-    init_fun : NNInitFunc = normal(dtype=dtype)
+    init_fun : NNInitFunc = normal()
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     symmetrization: str = 'kernel'
 
@@ -88,7 +88,7 @@ class ASymmqGPSProd(nn.Module):
     hilbert: HomogeneousHilbert
     n_determinants: int
     dtype: DType = jnp.complex128
-    init_fun : NNInitFunc = normal(dtype=dtype)
+    init_fun : NNInitFunc = normal()
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
 
 

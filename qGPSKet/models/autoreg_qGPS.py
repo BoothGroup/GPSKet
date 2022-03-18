@@ -87,7 +87,7 @@ class ARqGPS(AbstractARqGPS):
     """Type of the variational parameters"""
     machine_pow: int = 2
     """Exponent required to normalize the output"""
-    init_fun: NNInitFunc = normal(dtype=dtype)
+    init_fun: NNInitFunc = normal()
     """Initializer for the variational parameters"""
     to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
     """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
