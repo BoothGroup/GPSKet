@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def normal(sigma=1.e-1, dtype=complex):
+def normal(sigma=1.e-1):
     def init_fun(key, shape, dtype=dtype):
         if dtype is jnp.complex_:
             phases = sigma * jax.random.normal(key, shape, float) *1.j
