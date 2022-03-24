@@ -10,7 +10,7 @@ def transition_function(key, sample, return_updates=False):
     # pick one of the occupied sites
     is_occ_up = (sample & 1).astype(bool)
     is_occ_down = (sample & 2).astype(bool)
-    is_occ = is_occ_up.astype(jnp.uint8) + is_occ_down.astype(jnp.uint8)
+    occupancy_count = is_occ_up.astype(jnp.uint8) + is_occ_down.astype(jnp.uint8)
 
     keys = jax.random.split(key, num=n_chains)
 
@@ -22,7 +22,7 @@ def transition_function(key, sample, return_updates=False):
         spin = jax.random.choice(keyB, 2, p=spin_probs)+1
         return (start_site, spin, keyC)
 
-    start_sites, spins, new_keys = jax.vmap(find_electron, in_axes=(0,0,0,0), out_axes=(0,0,0))(is_occ_up, is_occ_down, is_occ, keys)
+    start_sites, spins, new_keys = jax.vmap(find_electron, in_axes=(0,0,0,0), out_axes=(0,0,0))(is_occ_up, is_occ_down, occupancy_count, keys)
 
     candidates = ~(sample[start_sites] & spins).astype(bool)
 
