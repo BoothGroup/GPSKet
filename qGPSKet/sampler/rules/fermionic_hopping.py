@@ -10,7 +10,7 @@ def transition_function(key, sample, return_updates=False):
     # pick one of the occupied sites
     is_occ_up = (sample & 1).astype(bool)
     is_occ_down = (sample & 2).astype(bool)
-    is_occ = jnp.logical_or(is_occ_up, is_occ_down)
+    is_occ = is_occ_up.astype(jnp.uint8) + is_occ_down.astype(jnp.uint8)
 
     keys = jax.random.split(key, num=n_chains)
 
