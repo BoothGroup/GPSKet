@@ -142,3 +142,62 @@ class ASymmqGPSProd(nn.Module):
         log_psi = jnp.log(jnp.sum(sd, axis=-1)) # (B,)
 
         return log_psi
+
+class ASymmqGPSExp(nn.Module):
+    hilbert: HomogeneousHilbert
+    n_determinants: int
+    dtype: DType = jnp.complex128
+    init_fun : NNInitFunc = normal()
+    apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
+
+
+    # Dimensions:
+    # - B = batch size
+    # - L = number of sites
+    # - N = total number of electrons
+    # - N_up = number of spin-up electrons
+    # - N_down = number of spin-down electrons
+    # - M = number of determinants
+    # - T = number of symmetries
+
+    def setup(self):
+        assert self.n_determinants % 2 != 0
+        self._determinants = [
+            SlaterDeterminant(
+                self.hilbert.size,
+                self.hilbert._n_elec,
+                dtype=self.dtype,
+                init_fun=self.init_fun
+            ) for _ in range(self.n_determinants)
+        ]
+
+    def __call__(self, x) -> Array:
+        if len(x.shape) == 1:
+            x = jnp.expand_dims(x, 0)
+        x = jnp.asarray(x, jnp.int32) # (B, L)
+
+        # Convert input configs from 2nd quantized representation x
+        # to 1st quantized representation y:
+        # x=[x_1, x_2, ..., x_L]
+        #                |
+        #                v
+        # y=(y_1, y_2, ..., y_{N_up}, y_{N_up+1}, y_{N_up+2}, ..., y_{N_up+N_down})
+
+        y = occupancies_to_electrons(x, self.hilbert._n_elec) # (B, N)
+
+        # Apply symmetry transformations
+        y = self.apply_symmetries(y) # (B, N, T)
+
+        # Evaluate Slater determinants
+        def evaluate_determinants(y_t):
+            sd_t = jnp.zeros(x.shape[0])
+            for i in range(self.n_determinants):
+                log_sd_i = self._determinants[i](y_t)
+                sd_t = sd_t + jnp.exp(log_sd_i)
+            return jnp.exp(sd_t) # (B,)
+        sd = jax.vmap(evaluate_determinants, in_axes=-1, out_axes=-1)(y) # (B, T)
+
+        # Compute log amplitudes
+        log_psi = jnp.log(jnp.sum(sd, axis=-1)) # (B,)
+
+        return log_psi
