@@ -3,4 +3,4 @@ from .qGPS import qGPS
 
 from .autoreg_qGPS import ARqGPS
 
-from .asymm_qGPS import ASymmqGPS, ASymmqGPSProd, ASymmqGPSExp
+from .asymm_qGPS import Slater, ASymmqGPS, ASymmqGPSProd, ASymmqGPSExp
