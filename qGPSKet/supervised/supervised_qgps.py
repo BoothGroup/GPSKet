@@ -17,6 +17,8 @@ from netket.utils.mpi import (
 
 from mpi4py import MPI
 
+from threadpoolctl import threadpool_limits
+
 class QGPSLearning():
     def __init__(self, epsilon, init_alpha=1.0, complex_expand=False):
         self.epsilon = np.array(epsilon)
@@ -36,6 +38,7 @@ class QGPSLearning():
         self.alpha_cutoff = 1.e10
         self.kern_cutoff = 1.e-10
         self.alpha_convergence_tol = 1.e-15
+        self.max_threads = 1
 
     @staticmethod
     @njit()
@@ -117,8 +120,15 @@ class QGPSLearning():
         self.valid_kern = abs(np.diag(self.KtK)) > self.kern_cutoff
 
         if np.sum(self.active_elements) > 0:
-            self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
-            weights = self.Sinv.dot(self.y[self.active_elements])
+            if _rank == 0:
+                with threadpool_limits(limits=self.max_threads, user_api="blas"):
+                    self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
+                    weights = self.Sinv.dot(self.y[self.active_elements])
+            else:
+                self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
+                weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
+            _MPI_comm.Bcast(self.Sinv, root=0)
+            _MPI_comm.Bcast(weights, root=0)
         else:
             self.Sinv = np.zeros((0,0))
 
