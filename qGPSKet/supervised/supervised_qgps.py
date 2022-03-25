@@ -65,12 +65,12 @@ class QGPSLearning():
     def update_site_prod_fast(epsilon, ref_site, ref_site_old, confs, site_product):
         eps = 1.e2 * np.finfo(np.double).eps
         for w in range(epsilon.shape[1]):
-            if np.min(np.abs(epsilon[:, w, ref_site])) > eps:
-                for i in range(confs.shape[0]):
+            for i in range(confs.shape[0]):
+                if np.abs(epsilon[confs[i, ref_site], w, ref_site]) > eps:
                     site_product[i, w] /= epsilon[confs[i, ref_site], w, ref_site]
                     site_product[i, w] *= epsilon[confs[i, ref_site_old], w, ref_site_old]
-            else:
-                for i in range(confs.shape[0]):
+                else:
+                    site_product[i, w] = 1.
                     for j in range(confs.shape[1]):
                         if j != ref_site:
                             site_product[i, w] *= epsilon[confs[i, j], w, j]
@@ -113,11 +113,14 @@ class QGPSLearning():
 
     def setup_fit_alpha_dep(self):
         self.active_elements = self.alpha_mat[self.ref_site,:] < self.alpha_cutoff
+        self.valid_kern = abs(np.diag(self.KtK)) > self.kern_cutoff
+
+        self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
+
         if self.complex_expand and self.epsilon.dtype==complex:
             self.KtK_alpha = self.KtK + np.diag(self.alpha_mat[self.ref_site,:]/2)
         else:
             self.KtK_alpha = self.KtK + np.diag(self.alpha_mat[self.ref_site,:])
-        self.valid_kern = abs(np.diag(self.KtK)) > self.kern_cutoff
 
         if np.sum(self.active_elements) > 0:
             if _rank == 0:
