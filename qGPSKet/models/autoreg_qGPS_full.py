@@ -31,13 +31,12 @@ class ConditionalqGPS(nn.Module):
             val = jnp.reshape(val, (self.M, -1))
             return val
         context_val = jax.vmap(take_context_val, in_axes=0)(context) # (B, M, L)
-        # context_val = jnp.reshape(context_val, (self.local_size, self.M, context_size))
         context_val = jnp.prod(context_val, axis=-1) # (B, M)
         site_prod = jax.vmap(lambda p: inputs_param*p, in_axes=0)(context_val) # (B, D, M)
         log_psi = jnp.sum(site_prod, axis=-1) # (B, D)
         return log_psi # (B, D)
 
-class AutoregressiveqGPS(nn.Module):
+class ARqGPSFull(nn.Module):
     hilbert: HomogeneousHilbert
     M: Union[int, List[int]]
     dtype: DType = jnp.complex128
@@ -56,7 +55,9 @@ class AutoregressiveqGPS(nn.Module):
 
     def _conditional(self, inputs: Array, index: int) -> Array:
         # Compute conditional probability for site at index
-        log_psi = self._conditional_wavefunctions[index](inputs) # (B, D)
+        # log_psi = self._conditional_wavefunctions[index](inputs) # (B, D)
+        # FIXME: this is inefficient, but has similar scaling as the ideal implementation
+        log_psi = _conditionals(self, inputs)[:, index, :]
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
@@ -114,18 +115,7 @@ class AutoregressiveqGPS(nn.Module):
         return log_psi_symm # (B,)
 
 
-def _conditionals(model: AutoregressiveqGPS, inputs: Array) -> Array:
-    # def _scan_fun(carry, index):
-    #     log_psi = model._conditional_wavefunctions[index](inputs)
-    #     return None, log_psi
-
-    # indices = jnp.arange(model.n_sites)
-    # _, log_psi = jax.lax.scan(
-    #     _scan_fun,
-    #     None,
-    #     indices
-    # )
-    # log_psi = jnp.transpose(log_psi, [1, 0, 2])
+def _conditionals(model: ARqGPSFull, inputs: Array) -> Array:
     batch_size = inputs.shape[0]
     log_psi = jnp.zeros((batch_size, model.n_sites, model.local_dim), model.dtype)
     context = jnp.expand_dims(inputs[:, 0], axis=1)
