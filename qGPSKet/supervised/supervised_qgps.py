@@ -122,16 +122,30 @@ class QGPSLearning():
         else:
             self.KtK_alpha = self.KtK + np.diag(self.alpha_mat[self.ref_site,:])
 
+        self.cholesky = False
         if np.sum(self.active_elements) > 0:
             if _rank == 0:
                 with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                    self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
-                    weights = self.Sinv.dot(self.y[self.active_elements])
+                    try:
+                        L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
+                        self.Sinv = sp.linalg.solve_triangular(L, np.eye(self.KtK_alpha.shape[0]), check_finite=False, lower=True)
+                        weights = sp.linalg.cho_solve((L, True), self.y[self.active_elements])
+                        self.cholesky = True
+                    except:
+                        self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
+                        weights = self.Sinv.dot(self.y[self.active_elements])
             else:
                 self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
                 weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
+
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(weights, root=0)
+            self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
+
+            # This bit is just to emphasize that self.Sinv is not the inverse of sigma but its Cholesky decomposition if self.cholesky==True
+            if self.cholesky:
+                self.Sinv_L = self.Sinv
+                self.Sinv = None
         else:
             self.Sinv = np.zeros((0,0))
 
@@ -145,17 +159,20 @@ class QGPSLearning():
             self.weights.fill(0.0)
 
         if np.sum(self.active_elements) > 0:
-            # potentially distribute weights across processes
             self.weights[self.active_elements] = weights
 
     def log_marg_lik_alpha_der(self):
-        derivative_alpha = 1/(self.alpha_mat[self.ref_site, :])
+        derivative_alpha = np.zeros(self.alpha_mat[self.ref_site, :].shape[0])
 
-        if self.complex_expand and self.epsilon.dtype==complex:
-            derivative_alpha[self.active_elements] -= np.diag(0.5 * self.Sinv).real
+        if self.cholesky:
+            derivative_alpha[self.active_elements] -= np.sum(abs(self.Sinv_L) ** 2, 0)
         else:
             derivative_alpha[self.active_elements] -= np.diag(self.Sinv).real
 
+        if self.complex_expand and self.epsilon.dtype==complex:
+            derivative_alpha[self.active_elements] *= 0.5
+
+        derivative_alpha += 1/(self.alpha_mat[self.ref_site, :])
         derivative_alpha -= (self.weights.conj() * self.weights).real
 
         if self.complex_expand or self.epsilon.dtype==float:
@@ -183,7 +200,6 @@ class QGPSLearning():
 
     def update_epsilon_with_weights(self):
         weights = np.where(self.valid_kern, self.weights, (self.epsilon[:, :, self.ref_site]).T.flatten())
-        # weights = self.weights
         self.epsilon[:, :, self.ref_site] = weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
 
         if self.complex_expand and self.epsilon.dtype==complex:
@@ -247,10 +263,16 @@ class QGPSLearningExp(QGPSLearning):
         log_lik -= np.dot(self.fit_data.conj(), self.S_diag * self.fit_data)
         log_lik = _MPI_comm.allreduce(log_lik)
 
-        if self.complex_expand and self.epsilon.dtype==complex:
-            log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
+        if self.cholesky:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.sum(np.log(0.5 * abs(np.diag(self.Sinv_L))**2))
+            else:
+                log_lik += 2 * np.sum(np.log(abs(np.diag(self.Sinv_L))))
         else:
-            log_lik += np.linalg.slogdet(self.Sinv)[1]
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
+            else:
+                log_lik += np.linalg.slogdet(self.Sinv)[1]
 
         if self.complex_expand and self.epsilon.dtype==complex:
             log_lik += 0.5 * np.sum(np.log(self.alpha_mat[self.ref_site, self.active_elements]))
@@ -272,8 +294,6 @@ class QGPSLearningExp(QGPSLearning):
         if self.weightings is not None:
             Delta_S /= self.weightings
 
-        derivative_noise = -np.sum(self.S_diag * del_S)
-
         K = self.K
         KtK_der = self.K.conj().T.dot(np.einsum("i,ij->ij", Delta_S, self.K))
 
@@ -284,10 +304,15 @@ class QGPSLearningExp(QGPSLearning):
         K = K[:,self.active_elements]
         KtK_der = KtK_der[np.ix_(self.active_elements, self.active_elements)]
 
-        if self.complex_expand and self.epsilon.dtype==complex:
-            derivative_noise -= 0.5 * np.trace(KtK_der.dot(self.Sinv))
+        if self.cholesky:
+            derivative_noise = np.trace(KtK_der.dot(self.Sinv_L.conj().T.dot(self.Sinv_L)))
         else:
-            derivative_noise -= np.trace(KtK_der.dot(self.Sinv))
+            derivative_noise = np.trace(KtK_der.dot(self.Sinv))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            derivative_noise *= 0.5
+
+        derivative_noise -= np.sum(self.S_diag * del_S)
 
         weights = self.weights[self.active_elements]
 
@@ -314,10 +339,16 @@ class QGPSLearningExp(QGPSLearning):
             if not np.max(self.active_elements):
                 converged = True
             else:
-                if self.complex_expand and self.epsilon.dtype==complex:
-                    gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*0.5*np.diag(self.Sinv).real)
+                if self.cholesky:
+                    diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
                 else:
-                    gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*np.diag(self.Sinv).real)
+                    diag_Sinv = np.diag(self.Sinv).real
+
+                if self.complex_expand and self.epsilon.dtype==complex:
+                    diag_Sinv *= 0.5
+
+                gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*diag_Sinv)
+
                 if rvm:
                     self.alpha_mat[self.ref_site, self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
                 else:
@@ -403,10 +434,17 @@ class QGPSLearningExp(QGPSLearning):
         bxy = self.y
         bxx = np.diag(self.KtK)
 
-        XXa = self.KtK[:, self.active_elements]
-        XS = np.dot(XXa, self.Sinv)
-        S = bxx - np.sum(XS * XXa, 1)
-        Q = bxy - np.dot(XS, self.y[self.active_elements])
+        if self.cholesky:
+            xxr = np.dot(self.KtK[:, self.active_elements], self.Sinv_L.conj().T)
+            rxy = np.dot(self.Sinv_L, self.y[self.active_elements])
+            S = bxx - np.sum(abs(xxr) ** 2, axis=1)
+            Q = bxy - np.dot(xxr, rxy)
+        else:
+            XXa = self.KtK[:, self.active_elements]
+            XS = np.dot(XXa, self.Sinv)
+            S = bxx - np.sum(XS * XXa, 1)
+            Q = bxy - np.dot(XS, self.y[self.active_elements])
+
         S = S.real
         Q = Q.real
         # Use following:
@@ -473,7 +511,6 @@ class QGPSLearningExp(QGPSLearning):
                 self.alpha_mat[self.ref_site, feature_index] = np.PINF
 
         return
-
 
 
     def fit_step_growing_RVM(self, confset, target_amplitudes, ref_site,alpha_iterations=None, multiplication=None, weightings=None):
