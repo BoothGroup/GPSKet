@@ -123,20 +123,20 @@ class QGPSLearning():
             self.KtK_alpha = self.KtK + np.diag(self.alpha_mat[self.ref_site,:])
 
         self.cholesky = False
-        if np.sum(self.active_elements) > 0:
+        self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
+        weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
+
+        if self.active_elements.any():
             if _rank == 0:
                 with threadpool_limits(limits=self.max_threads, user_api="blas"):
                     try:
                         L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
-                        self.Sinv = sp.linalg.solve_triangular(L, np.eye(self.KtK_alpha.shape[0]), check_finite=False, lower=True)
-                        weights = sp.linalg.cho_solve((L, True), self.y[self.active_elements])
+                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
+                        np.copyto(weights, sp.linalg.cho_solve((L, True), self.y[self.active_elements]))
                         self.cholesky = True
                     except:
-                        self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
-                        weights = self.Sinv.dot(self.y[self.active_elements])
-            else:
-                self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
-                weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
+                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)]))
+                        np.copyto(weights, self.Sinv.dot(self.y[self.active_elements]))
 
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(weights, root=0)
@@ -146,8 +146,6 @@ class QGPSLearning():
             if self.cholesky:
                 self.Sinv_L = self.Sinv
                 self.Sinv = None
-        else:
-            self.Sinv = np.zeros((0,0))
 
         if self.weights is None:
             if not self.complex_expand and self.epsilon.dtype==complex:
@@ -158,7 +156,7 @@ class QGPSLearning():
         else:
             self.weights.fill(0.0)
 
-        if np.sum(self.active_elements) > 0:
+        if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
     def log_marg_lik_alpha_der(self):
