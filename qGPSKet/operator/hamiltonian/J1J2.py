@@ -100,6 +100,6 @@ def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly):
 def get_local_kernel(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly, chunk_size: Optional[int] = None):
     try:
         use_fast_update = vstate.model.apply_fast_update
-    except NameError:
+    except:
         use_fast_update = False
     return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)
