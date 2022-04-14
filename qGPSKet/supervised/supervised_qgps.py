@@ -77,6 +77,10 @@ class QGPSLearning():
     def alpha_mat_ref_sites(self):
         return self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids]
 
+    @alpha_mat_ref_sites.setter
+    def alpha_mat_ref_sites(self, alpha):
+        self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids] = alpha
+
     @staticmethod
     @njit()
     def kernel_mat_inner(site_prod, conns, K, ref_sites):
@@ -382,9 +386,7 @@ class QGPSLearningExp(QGPSLearning):
             if j >= max_iterations:
                 converged = True
         while not converged:
-            if not np.max(self.active_elements):
-                converged = True
-            else:
+            if np.any(self.active_elements):
                 if self.cholesky:
                     diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
                 else:
@@ -395,10 +397,15 @@ class QGPSLearningExp(QGPSLearning):
 
                 gamma = (1 - (self.alpha_mat_ref_sites[self.active_elements])*diag_Sinv)
 
+                alpha = self.alpha_mat_ref_sites
+
                 if rvm:
-                    self.alpha_mat_ref_sites[self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
+                    alpha[self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
                 else:
-                    self.alpha_mat_ref_sites[self.active_elements] = ((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real)
+                    alpha[self.active_elements] = ((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real)
+
+                self.alpha_mat_ref_sites = alpha
+
                 self.setup_fit_alpha_dep()
                 j += 1
                 if np.sum(abs(self.alpha_mat_ref_sites - alpha_old)**2) < self.alpha_convergence_tol:
@@ -407,6 +414,8 @@ class QGPSLearningExp(QGPSLearning):
                 if max_iterations is not None:
                     if j >= max_iterations:
                         converged = True
+            else:
+                converged = True
 
     def fit_step(self, confset, target_amplitudes, ref_sites, noise_bounds=[(None, None)],
                  opt_alpha=True, opt_noise=True, max_alpha_iterations=None, max_noise_iterations=None, rvm=False,
