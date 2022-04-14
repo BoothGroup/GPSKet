@@ -402,7 +402,7 @@ class QGPSLearningExp(QGPSLearning):
                 if rvm:
                     alpha[self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
                 else:
-                    alpha[self.active_elements] = ((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real)
+                    alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
 
                 self.alpha_mat_ref_sites = alpha
 
