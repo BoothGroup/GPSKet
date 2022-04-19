@@ -250,7 +250,12 @@ class QGPSLearning():
         return _MPI_comm.allreduce(np.sum(errors))
 
     def update_epsilon_with_weights(self):
-        weights = np.where(self.valid_kern, self.weights, (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten())
+        old_weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            old_weights = np.concatenate((old_weights.imag, old_weights.real))
+
+        weights = np.where(self.valid_kern, self.weights, old_weights)
         self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:self.epsilon.shape[0]*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
 
         if self.complex_expand and self.epsilon.dtype==complex:
@@ -393,7 +398,7 @@ class QGPSLearningExp(QGPSLearning):
                     diag_Sinv = np.diag(self.Sinv).real
 
                 if self.complex_expand and self.epsilon.dtype==complex:
-                    diag_Sinv *= 0.5
+                    diag_Sinv = diag_Sinv * 0.5
 
                 gamma = (1 - (self.alpha_mat_ref_sites[self.active_elements])*diag_Sinv)
 
