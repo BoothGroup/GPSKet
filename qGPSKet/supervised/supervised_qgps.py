@@ -83,23 +83,25 @@ class QGPSLearning():
 
     @staticmethod
     @njit()
-    def kernel_mat_inner(site_prod, conns, K, ref_sites):
+    def kernel_mat_inner(site_prod, confs, K, ref_sites):
         K = K.reshape(site_prod.shape[0], site_prod.shape[1], -1)
         K.fill(0.0)
         for i in range(site_prod.shape[0]):
             for j in range(ref_sites.shape[0]):
-                K[i, j, conns[i, ref_sites[j]]] += site_prod[i, j]
+                for k in range(site_prod.shape[2]):
+                    K[i, j, confs[i, ref_sites[j], k]] += site_prod[i, j, k]
         return K.reshape(site_prod.shape[0], -1)
 
     @staticmethod
     @njit()
-    def compute_site_prod_fast(epsilon, ref_sites, conns, site_product):
+    def compute_site_prod_fast(epsilon, ref_sites, confs, site_product):
         site_product.fill(1.0)
-        for i in range(conns.shape[0]):
+        for i in range(confs.shape[0]):
             for w in range(epsilon.shape[1]):
-                for j in range(conns.shape[1]):
+                for j in range(confs.shape[1]):
                     if j != ref_sites[w]:
-                        site_product[i, w] *= epsilon[conns[i, j], w, j]
+                        for k in range(confs.shape[2]):
+                            site_product[i, w, k] *= epsilon[confs[i, j, k], w, j]
         return site_product
 
     @staticmethod
@@ -111,19 +113,20 @@ class QGPSLearning():
             ref_site_old = ref_sites_old[w]
             if ref_site != ref_site_old:
                 for i in range(confs.shape[0]):
-                    if np.abs(epsilon[confs[i, ref_site], w, ref_site]) > eps:
-                        site_product[i, w] /= epsilon[confs[i, ref_site], w, ref_site]
-                        site_product[i, w] *= epsilon[confs[i, ref_site_old], w, ref_site_old]
-                    else:
-                        site_product[i, w] = 1.
-                        for j in range(confs.shape[1]):
-                            if j != ref_site:
-                                site_product[i, w] *= epsilon[confs[i, j], w, j]
+                    for k in range(confs.shape[2]):
+                        if np.abs(epsilon[confs[i, ref_site, k], w, ref_site]) > eps:
+                            site_product[i, w, k] /= epsilon[confs[i, ref_site, k], w, ref_site]
+                            site_product[i, w, k] *= epsilon[confs[i, ref_site_old, k], w, ref_site_old]
+                        else:
+                            site_product[i, w, k] = 1.
+                            for j in range(confs.shape[1]):
+                                if j != ref_site:
+                                    site_product[i, w, k] *= epsilon[confs[i, j, k], w, j]
 
         return site_product
 
     def compute_site_prod(self):
-        self.site_prod = np.zeros((self.confs.shape[0], self.epsilon.shape[1]), dtype=self.epsilon.dtype)
+        self.site_prod = np.zeros((self.confs.shape[0], self.epsilon.shape[1], self.confs.shape[-1]), dtype=self.epsilon.dtype)
         self.site_prod = self.compute_site_prod_fast(self.epsilon, self.ref_sites, self.confs, self.site_prod)
         self.site_prod_ref_sites = self.ref_sites
 
@@ -136,6 +139,9 @@ class QGPSLearning():
     def set_kernel_mat(self, confs, update_K=False):
         assert(self.ref_sites is not None)
         recompute_site_prod = False
+
+        if len(confs.shape) == 2:
+            confs = np.expand_dims(confs, axis=-1)
 
         if self.confs is not None:
             if not np.array_equal(self.confs, confs) or self.site_prod is None:
