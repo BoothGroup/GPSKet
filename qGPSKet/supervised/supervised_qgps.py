@@ -409,7 +409,7 @@ class QGPSLearningExp(QGPSLearning):
                 else:
                     alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
 
-                self.alpha_mat_ref_sites = alpha
+                self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
 
                 self.setup_fit_alpha_dep()
                 j += 1
