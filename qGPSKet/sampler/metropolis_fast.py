@@ -64,15 +64,10 @@ class MetropolisFastSampler(MetropolisSampler):
                 # do_accept must match ndim of proposal and state (which is 2)
                 s.σ = jnp.where(do_accept.reshape(-1, 1), σp, s.σ)
 
-                site_product_old = s.intermediates_cache["intermediates_cache"]["site_prod"]
-                site_product_new = new_intermediates_cache["intermediates_cache"]["site_prod"]
-                samples_old = s.intermediates_cache["intermediates_cache"]["samples"]
-                samples_new = new_intermediates_cache["intermediates_cache"]["samples"]
+                def update(old_state, new_state):
+                    return jax.vmap(jnp.where)(do_accept, old_state, new_state)
 
-                site_product_updated = jnp.where(do_accept.reshape(-1,1,1), site_product_new, site_product_old)
-                samples_updated = jnp.where(do_accept.reshape(-1,1), samples_new, samples_old)
-
-                s.intermediates_cache = {"intermediates_cache": {"site_prod": site_product_updated, "samples": samples_updated}}
+                s.intermediates_cache = jax.tree_map(update, new_intermediates_cache, s.intermediates_cache)
 
                 s.accepted += do_accept.sum()
 

@@ -21,89 +21,148 @@ from threadpoolctl import threadpool_limits
 
 class QGPSLearning():
     def __init__(self, epsilon, init_alpha=1.0, complex_expand=False):
+        self.complex_expand = complex_expand
+        self._epsilon = None
         self.epsilon = np.array(epsilon)
+        """ We set the range ids whenever we set epsilon, this is used for indexing
+        (we don't want to create a new arange each time we need it), can probably
+        be done a little bit more elegantly
+        """
         self.K = None
         self.weights = None
         self.site_prod = None
         self.confs = None
-        self.ref_site = None
-        self.complex_expand = complex_expand
-        self.local_dim = epsilon.shape[0]
-
+        self._ref_sites = None
         if self.complex_expand and self.epsilon.dtype==complex:
-            self.alpha_mat = np.ones((epsilon.shape[-1], self.local_dim*2*epsilon.shape[1]))*init_alpha
+            self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*2*self.epsilon.shape[1]))*init_alpha
         else:
-            self.alpha_mat = np.ones((epsilon.shape[-1], self.local_dim*epsilon.shape[1]))*init_alpha
+            self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*self.epsilon.shape[1]))*init_alpha
 
         self.alpha_cutoff = 1.e10
         self.kern_cutoff = 1.e-10
         self.alpha_convergence_tol = 1.e-15
         self.max_threads = 1
 
+    @property
+    def epsilon(self):
+        return self._epsilon
+
+    @epsilon.setter
+    def epsilon(self, epsilon):
+        if self._epsilon is not None:
+            assert(epsilon.shape == self.epsilon.shape)
+        self._epsilon = np.array(epsilon)
+        self.support_dim_range_ids = np.arange(epsilon.shape[1])
+        if self.complex_expand and self.epsilon.dtype==complex:
+            self.feature_ids = np.arange(2 * epsilon.shape[0] * epsilon.shape[1])
+        else:
+            self.feature_ids = np.arange(epsilon.shape[0] * epsilon.shape[1])
+        self.reset()
+
+    @property
+    def ref_sites(self):
+        return self._ref_sites
+
+    @ref_sites.setter
+    def ref_sites(self, ref_sites_or_site):
+        if isinstance(ref_sites_or_site, (int, np.integer)):
+            self._ref_sites = ref_sites_or_site * np.ones(self.epsilon.shape[1], dtype=int)
+        else:
+            self._ref_sites = ref_sites_or_site
+        self._ref_sites_incr_dim = np.tile(self._ref_sites, (self.epsilon.shape[0], 1)).T.flatten()
+        if self.complex_expand and self.epsilon.dtype==complex:
+            self._ref_sites_incr_dim = np.tile(self._ref_sites_incr_dim, 2)
+
+    @property
+    def alpha_mat_ref_sites(self):
+        return self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids]
+
+    @alpha_mat_ref_sites.setter
+    def alpha_mat_ref_sites(self, alpha):
+        self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids] = alpha
+
     @staticmethod
     @njit()
-    def kernel_mat_inner(site_prod, conns, K, ref_site):
+    def kernel_mat_inner(site_prod, confs, K, ref_sites):
         K = K.reshape(site_prod.shape[0], site_prod.shape[1], -1)
         K.fill(0.0)
         for i in range(site_prod.shape[0]):
-            K[i, :, conns[i, ref_site]] += site_prod[i, :]
+            for j in range(ref_sites.shape[0]):
+                for k in range(site_prod.shape[2]):
+                    K[i, j, confs[i, ref_sites[j], k]] += site_prod[i, j, k]
         return K.reshape(site_prod.shape[0], -1)
 
     @staticmethod
     @njit()
-    def compute_site_prod_fast(epsilon, ref_site, conns, site_product):
+    def compute_site_prod_fast(epsilon, ref_sites, confs, site_product):
         site_product.fill(1.0)
-        for i in range(conns.shape[0]):
+        for i in range(confs.shape[0]):
             for w in range(epsilon.shape[1]):
-                for j in range(conns.shape[1]):
-                    if j != ref_site:
-                        site_product[i, w] *= epsilon[conns[i, j], w, j]
+                for j in range(confs.shape[1]):
+                    if j != ref_sites[w]:
+                        for k in range(confs.shape[2]):
+                            site_product[i, w, k] *= epsilon[confs[i, j, k], w, j]
         return site_product
 
     @staticmethod
     @njit()
-    def update_site_prod_fast(epsilon, ref_site, ref_site_old, confs, site_product):
+    def update_site_prod_fast(epsilon, ref_sites, ref_sites_old, confs, site_product):
         eps = 1.e2 * np.finfo(np.double).eps
         for w in range(epsilon.shape[1]):
-            if np.min(np.abs(epsilon[:, w, ref_site])) > eps:
+            ref_site = ref_sites[w]
+            ref_site_old = ref_sites_old[w]
+            if ref_site != ref_site_old:
                 for i in range(confs.shape[0]):
-                    site_product[i, w] /= epsilon[confs[i, ref_site], w, ref_site]
-                    site_product[i, w] *= epsilon[confs[i, ref_site_old], w, ref_site_old]
-            else:
-                for i in range(confs.shape[0]):
-                    for j in range(confs.shape[1]):
-                        if j != ref_site:
-                            site_product[i, w] *= epsilon[confs[i, j], w, j]
+                    for k in range(confs.shape[2]):
+                        if np.abs(epsilon[confs[i, ref_site, k], w, ref_site]) > eps:
+                            site_product[i, w, k] /= epsilon[confs[i, ref_site, k], w, ref_site]
+                            site_product[i, w, k] *= epsilon[confs[i, ref_site_old, k], w, ref_site_old]
+                        else:
+                            site_product[i, w, k] = 1.
+                            for j in range(confs.shape[1]):
+                                if j != ref_site:
+                                    site_product[i, w, k] *= epsilon[confs[i, j, k], w, j]
 
         return site_product
 
     def compute_site_prod(self):
-        self.site_prod = np.zeros((self.confs.shape[0], self.epsilon.shape[1]), dtype=self.epsilon.dtype)
-        self.site_prod = self.compute_site_prod_fast(self.epsilon, self.ref_site, self.confs, self.site_prod)
-        self.site_prod_ref_site = self.ref_site
+        self.site_prod = np.zeros((self.confs.shape[0], self.epsilon.shape[1], self.confs.shape[-1]), dtype=self.epsilon.dtype)
+        self.site_prod = self.compute_site_prod_fast(self.epsilon, self.ref_sites, self.confs, self.site_prod)
+        self.site_prod_ref_sites = self.ref_sites
 
     def update_site_prod(self):
-        if self.site_prod_ref_site != self.ref_site:
-            self.site_prod = self.update_site_prod_fast(self.epsilon, self.ref_site, self.site_prod_ref_site, self.confs,
+        if not np.array_equal(self.site_prod_ref_sites, self.ref_sites):
+            self.site_prod = self.update_site_prod_fast(self.epsilon, self.ref_sites, self.site_prod_ref_sites, self.confs,
                                                         self.site_prod)
-        self.site_prod_ref_site = self.ref_site
+        self.site_prod_ref_sites = self.ref_sites
 
     def set_kernel_mat(self, confs, update_K=False):
-        assert(self.ref_site is not None)
-        if self.site_prod is None or self.confs is None or np.sum(self.confs != confs) != 0:
+        assert(self.ref_sites is not None)
+        recompute_site_prod = False
+
+        if len(confs.shape) == 2:
+            confs = np.expand_dims(confs, axis=-1)
+
+        if self.confs is not None:
+            if not np.array_equal(self.confs, confs) or self.site_prod is None:
+                recompute_site_prod = True
+            elif not np.array_equal(self.ref_sites, self.site_prod_ref_sites):
+                self.update_site_prod()
+                update_K = True
+        else:
+            recompute_site_prod = True
+
+        if recompute_site_prod:
             self.confs = confs
             self.compute_site_prod()
-            update_K = True
-        elif self.ref_site != self.site_prod_ref_site:
-            self.update_site_prod()
-            update_K = True
+            self.K = None
 
         if self.K is None:
-            self.K = np.zeros((confs.shape[0], self.epsilon.shape[1] * self.local_dim), dtype=self.epsilon.dtype)
+            self.K = np.zeros((confs.shape[0], self.epsilon.shape[1] * self.epsilon.shape[0]), dtype=self.epsilon.dtype)
             update_K = True
 
         if update_K:
-            self.K = self.kernel_mat_inner(self.site_prod, self.confs, self.K, self.ref_site)
+            self.K = self.kernel_mat_inner(self.site_prod, self.confs, self.K, self.ref_sites)
 
         return self.K
 
@@ -112,47 +171,65 @@ class QGPSLearning():
         self.K = None
 
     def setup_fit_alpha_dep(self):
-        self.active_elements = self.alpha_mat[self.ref_site,:] < self.alpha_cutoff
-        if self.complex_expand and self.epsilon.dtype==complex:
-            self.KtK_alpha = self.KtK + np.diag(self.alpha_mat[self.ref_site,:]/2)
-        else:
-            self.KtK_alpha = self.KtK + np.diag(self.alpha_mat[self.ref_site,:])
+        self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
         self.valid_kern = abs(np.diag(self.KtK)) > self.kern_cutoff
 
-        if np.sum(self.active_elements) > 0:
+        self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            self.KtK_alpha = self.KtK + np.diag(self.alpha_mat_ref_sites/2)
+        else:
+            self.KtK_alpha = self.KtK + np.diag(self.alpha_mat_ref_sites)
+
+        self.cholesky = False
+        self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
+        weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
+
+        if self.active_elements.any():
             if _rank == 0:
                 with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                    self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
-                    weights = self.Sinv.dot(self.y[self.active_elements])
-            else:
-                self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
-                weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
+                    try:
+                        L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
+                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
+                        np.copyto(weights, sp.linalg.cho_solve((L, True), self.y[self.active_elements]))
+                        self.cholesky = True
+                    except:
+                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)]))
+                        np.copyto(weights, self.Sinv.dot(self.y[self.active_elements]))
+
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(weights, root=0)
-        else:
-            self.Sinv = np.zeros((0,0))
+            self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
+
+            # This bit is just to emphasize that self.Sinv is not the inverse of sigma but its Cholesky decomposition if self.cholesky==True
+            if self.cholesky:
+                self.Sinv_L = self.Sinv
+                self.Sinv = None
 
         if self.weights is None:
             if not self.complex_expand and self.epsilon.dtype==complex:
-                self.weights = np.zeros(self.alpha_mat.shape[1], dtype=complex)
+                self.weights = np.zeros(self.alpha_mat_ref_sites.shape[0], dtype=complex)
             else:
-                self.weights = np.zeros(self.alpha_mat.shape[1], dtype=float)
+                self.weights = np.zeros(self.alpha_mat_ref_sites.shape[0], dtype=float)
 
         else:
             self.weights.fill(0.0)
 
-        if np.sum(self.active_elements) > 0:
-            # potentially distribute weights across processes
+        if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
     def log_marg_lik_alpha_der(self):
-        derivative_alpha = 1/(self.alpha_mat[self.ref_site, :])
+        derivative_alpha = np.zeros(self.alpha_mat_ref_sites.shape[0])
 
-        if self.complex_expand and self.epsilon.dtype==complex:
-            derivative_alpha[self.active_elements] -= np.diag(0.5 * self.Sinv).real
+        if self.cholesky:
+            derivative_alpha[self.active_elements] -= np.sum(abs(self.Sinv_L) ** 2, 0)
         else:
             derivative_alpha[self.active_elements] -= np.diag(self.Sinv).real
 
+        if self.complex_expand and self.epsilon.dtype==complex:
+            derivative_alpha[self.active_elements] *= 0.5
+
+        derivative_alpha += 1/(self.alpha_mat_ref_sites)
         derivative_alpha -= (self.weights.conj() * self.weights).real
 
         if self.complex_expand or self.epsilon.dtype==float:
@@ -161,8 +238,8 @@ class QGPSLearning():
         return derivative_alpha.real
 
     def set_up_prediction(self, confset):
-        if self.ref_site is None:
-            self.ref_site = 0
+        if self.ref_sites is None:
+            self.ref_sites = 0
 
         self.set_kernel_mat(confset)
 
@@ -179,13 +256,16 @@ class QGPSLearning():
         return _MPI_comm.allreduce(np.sum(errors))
 
     def update_epsilon_with_weights(self):
-        weights = np.where(self.valid_kern, self.weights, (self.epsilon[:, :, self.ref_site]).T.flatten())
-        # weights = self.weights
-        self.epsilon[:, :, self.ref_site] = weights[:self.local_dim*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.local_dim).T
+        old_weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, :, self.ref_site] += 1.j * weights[self.local_dim*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.local_dim).T
+            old_weights = np.concatenate((old_weights.imag, old_weights.real))
 
+        weights = np.where(self.valid_kern, self.weights, old_weights)
+        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:self.epsilon.shape[0]*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            self.epsilon[:, self.support_dim_range_ids, self.ref_sites] += 1.j * weights[self.epsilon.shape[0]*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
 
 
 class QGPSLearningExp(QGPSLearning):
@@ -197,7 +277,7 @@ class QGPSLearningExp(QGPSLearning):
     def predict(self, confset):
         assert(confset.size > 0)
         self.set_up_prediction(confset)
-        return np.exp(self.K.dot((self.epsilon[:, :, self.ref_site].T).flatten()))
+        return np.exp(self.K.dot((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten()))
 
     def setup_fit_noise_dep(self, weightings=None):
         if self.noise_tilde == 0.:
@@ -218,8 +298,8 @@ class QGPSLearningExp(QGPSLearning):
 
         self.setup_fit_alpha_dep()
 
-    def setup_fit(self, confset, target_amplitudes, ref_site, weightings=None):
-        self.ref_site = ref_site
+    def setup_fit(self, confset, target_amplitudes, ref_sites, weightings=None):
+        self.ref_sites = ref_sites
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
         if self.epsilon.dtype == float:
             self.fit_data = np.log(abs(self.exp_amps))
@@ -244,15 +324,21 @@ class QGPSLearningExp(QGPSLearning):
         log_lik -= np.dot(self.fit_data.conj(), self.S_diag * self.fit_data)
         log_lik = _MPI_comm.allreduce(log_lik)
 
-        if self.complex_expand and self.epsilon.dtype==complex:
-            log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
+        if self.cholesky:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.sum(np.log(0.5 * abs(np.diag(self.Sinv_L))**2))
+            else:
+                log_lik += 2 * np.sum(np.log(abs(np.diag(self.Sinv_L))))
         else:
-            log_lik += np.linalg.slogdet(self.Sinv)[1]
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
+            else:
+                log_lik += np.linalg.slogdet(self.Sinv)[1]
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            log_lik += 0.5 * np.sum(np.log(self.alpha_mat[self.ref_site, self.active_elements]))
+            log_lik += 0.5 * np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
         else:
-            log_lik += np.sum(np.log(self.alpha_mat[self.ref_site, self.active_elements]))
+            log_lik += np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
 
         weights = self.weights[self.active_elements]
         log_lik += np.dot(weights.conj(), np.dot(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], weights))
@@ -269,8 +355,6 @@ class QGPSLearningExp(QGPSLearning):
         if self.weightings is not None:
             Delta_S /= self.weightings
 
-        derivative_noise = -np.sum(self.S_diag * del_S)
-
         K = self.K
         KtK_der = self.K.conj().T.dot(np.einsum("i,ij->ij", Delta_S, self.K))
 
@@ -281,10 +365,15 @@ class QGPSLearningExp(QGPSLearning):
         K = K[:,self.active_elements]
         KtK_der = KtK_der[np.ix_(self.active_elements, self.active_elements)]
 
-        if self.complex_expand and self.epsilon.dtype==complex:
-            derivative_noise -= 0.5 * np.trace(KtK_der.dot(self.Sinv))
+        if self.cholesky:
+            derivative_noise = np.trace(KtK_der.dot(self.Sinv_L.conj().T.dot(self.Sinv_L)))
         else:
-            derivative_noise -= np.trace(KtK_der.dot(self.Sinv))
+            derivative_noise = np.trace(KtK_der.dot(self.Sinv))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            derivative_noise *= 0.5
+
+        derivative_noise -= np.sum(self.S_diag * del_S)
 
         weights = self.weights[self.active_elements]
 
@@ -301,43 +390,54 @@ class QGPSLearningExp(QGPSLearning):
         return derivative_noise.real
 
     def opt_alpha(self, max_iterations=None, rvm=False):
-        alpha_old = self.alpha_mat[self.ref_site, :].copy()
+        alpha_old = self.alpha_mat_ref_sites.copy()
         converged = False
         j = 0
         if max_iterations is not None:
             if j >= max_iterations:
                 converged = True
         while not converged:
-            if not np.max(self.active_elements):
-                converged = True
-            else:
+            if np.any(self.active_elements):
+                if self.cholesky:
+                    diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
+                else:
+                    diag_Sinv = np.diag(self.Sinv).real
+
                 if self.complex_expand and self.epsilon.dtype==complex:
-                    gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*0.5*np.diag(self.Sinv).real)
-                else:
-                    gamma = (1 - (self.alpha_mat[self.ref_site, self.active_elements])*np.diag(self.Sinv).real)
+                    diag_Sinv = diag_Sinv * 0.5
+
+                gamma = (1 - (self.alpha_mat_ref_sites[self.active_elements])*diag_Sinv)
+
+                alpha = self.alpha_mat_ref_sites
+
                 if rvm:
-                    self.alpha_mat[self.ref_site, self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
+                    alpha[self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
                 else:
-                    self.alpha_mat[self.ref_site, self.active_elements] = ((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real)
+                    alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
+
+                self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
+
                 self.setup_fit_alpha_dep()
                 j += 1
-                if np.sum(abs(self.alpha_mat[self.ref_site, :] - alpha_old)**2) < self.alpha_convergence_tol:
+                if np.sum(abs(self.alpha_mat_ref_sites - alpha_old)**2) < self.alpha_convergence_tol:
                     converged = True
-                np.copyto(alpha_old, self.alpha_mat[self.ref_site, :])
+                np.copyto(alpha_old, self.alpha_mat_ref_sites)
                 if max_iterations is not None:
                     if j >= max_iterations:
                         converged = True
+            else:
+                converged = True
 
-    def fit_step(self, confset, target_amplitudes, ref_site, noise_bounds=[(None, None)],
+    def fit_step(self, confset, target_amplitudes, ref_sites, noise_bounds=[(None, None)],
                  opt_alpha=True, opt_noise=True, max_alpha_iterations=None, max_noise_iterations=None, rvm=False,
                  weightings=None):
-        self.setup_fit(confset, target_amplitudes, ref_site, weightings=weightings)
+        self.setup_fit(confset, target_amplitudes, ref_sites, weightings=weightings)
         if opt_noise:
-            alpha_init = self.alpha_mat.copy()
+            alpha_init = self.alpha_mat_ref_sites.copy()
             def ML(x):
                 self.noise_tilde = np.exp(x[0])
                 if opt_alpha:
-                    np.copyto(self.alpha_mat, alpha_init)
+                    np.copyto(self.alpha_mat_ref_sites, alpha_init)
                 self.setup_fit_noise_dep(weightings=weightings)
                 if opt_alpha:
                     self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
@@ -346,7 +446,7 @@ class QGPSLearningExp(QGPSLearning):
             def derivative(x):
                 self.noise_tilde = np.exp(x[0])
                 if opt_alpha:
-                    np.copyto(self.alpha_mat, alpha_init)
+                    np.copyto(self.alpha_mat_ref_sites, alpha_init)
                 self.setup_fit_noise_dep(weightings=weightings)
                 if opt_alpha:
                     self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
@@ -357,7 +457,7 @@ class QGPSLearningExp(QGPSLearning):
                 self.noise_tilde = np.exp(x[0])
                 if opt_alpha:
                     self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
-                np.copyto(alpha_init, self.alpha_mat)
+                np.copyto(alpha_init, self.alpha_mat_ref_sites)
 
             if max_noise_iterations is not None:
                 opt = sp.optimize.minimize(ML, np.log(self.noise_tilde), options={"maxiter" : max_noise_iterations}, jac=derivative, bounds=noise_bounds, callback=update_alpha)
@@ -366,7 +466,7 @@ class QGPSLearningExp(QGPSLearning):
 
             self.noise_tilde = np.exp(opt.x)[0]
             if opt_alpha:
-                np.copyto(self.alpha_mat, alpha_init)
+                np.copyto(self.alpha_mat_ref_sites, alpha_init)
             self.setup_fit_noise_dep(weightings=weightings)
 
         if opt_alpha:
@@ -400,10 +500,17 @@ class QGPSLearningExp(QGPSLearning):
         bxy = self.y
         bxx = np.diag(self.KtK)
 
-        XXa = self.KtK[:, self.active_elements]
-        XS = np.dot(XXa, self.Sinv)
-        S = bxx - np.sum(XS * XXa, 1)
-        Q = bxy - np.dot(XS, self.y[self.active_elements])
+        if self.cholesky:
+            xxr = np.dot(self.KtK[:, self.active_elements], self.Sinv_L.conj().T)
+            rxy = np.dot(self.Sinv_L, self.y[self.active_elements])
+            S = bxx - np.sum(abs(xxr) ** 2, axis=1)
+            Q = bxy - np.dot(xxr, rxy)
+        else:
+            XXa = self.KtK[:, self.active_elements]
+            XS = np.dot(XXa, self.Sinv)
+            S = bxx - np.sum(XS * XXa, 1)
+            Q = bxy - np.dot(XS, self.y[self.active_elements])
+
         S = S.real
         Q = Q.real
         # Use following:
@@ -414,11 +521,11 @@ class QGPSLearningExp(QGPSLearning):
         Qa, Sa = Q[self.active_elements], S[self.active_elements]
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            qi[self.active_elements] = self.alpha_mat[self.ref_site, self.active_elements] * Qa / (self.alpha_mat[self.ref_site, self.active_elements] - 2*Sa)
-            si[self.active_elements] = self.alpha_mat[self.ref_site, self.active_elements] * Sa / (self.alpha_mat[self.ref_site, self.active_elements] - 2*Sa)
+            qi[self.active_elements] = self.alpha_mat_ref_sites[self.active_elements] * Qa / (self.alpha_mat_ref_sites[self.active_elements] - 2*Sa)
+            si[self.active_elements] = self.alpha_mat_ref_sites[self.active_elements] * Sa / (self.alpha_mat_ref_sites[self.active_elements] - 2*Sa)
         else:
-            qi[self.active_elements] = self.alpha_mat[self.ref_site, self.active_elements] * Qa / (self.alpha_mat[self.ref_site, self.active_elements] - Sa)
-            si[self.active_elements] = self.alpha_mat[self.ref_site, self.active_elements] * Sa / (self.alpha_mat[self.ref_site, self.active_elements] - Sa)
+            qi[self.active_elements] = self.alpha_mat_ref_sites[self.active_elements] * Qa / (self.alpha_mat_ref_sites[self.active_elements] - Sa)
+            si[self.active_elements] = self.alpha_mat_ref_sites[self.active_elements] * Sa / (self.alpha_mat_ref_sites[self.active_elements] - Sa)
         return [si, qi, S, Q]
 
     def update_precisions(self, s, q, S, Q):
@@ -434,11 +541,11 @@ class QGPSLearningExp(QGPSLearning):
         Qadd, Sadd = Q[add], S[add]
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            Qrec, Srec, Arec = Q[recompute], S[recompute], self.alpha_mat[self.ref_site, recompute]/2
-            Qdel, Sdel, Adel = Q[delete], S[delete], self.alpha_mat[self.ref_site, delete]/2
+            Qrec, Srec, Arec = Q[recompute], S[recompute], self.alpha_mat_ref_sites[recompute]/2
+            Qdel, Sdel, Adel = Q[delete], S[delete], self.alpha_mat_ref_sites[delete]/2
         else:
-            Qrec, Srec, Arec = Q[recompute], S[recompute], self.alpha_mat[self.ref_site, recompute]
-            Qdel, Sdel, Adel = Q[delete], S[delete], self.alpha_mat[self.ref_site, delete]
+            Qrec, Srec, Arec = Q[recompute], S[recompute], self.alpha_mat_ref_sites[recompute]
+            Qdel, Sdel, Adel = Q[delete], S[delete], self.alpha_mat_ref_sites[delete]
 
         # compute new alpha's (precision parameters) for features that are
         # currently in model and will be recomputed
@@ -461,16 +568,15 @@ class QGPSLearningExp(QGPSLearning):
 
         if theta[feature_index] > 0:
             if self.complex_expand and self.epsilon.dtype==complex:
-                self.alpha_mat[self.ref_site, feature_index] = 2 * (s[feature_index] ** 2 / theta[feature_index])
+                self.alpha_mat_ref_sites[feature_index] = 2 * (s[feature_index] ** 2 / theta[feature_index])
             else:
-                self.alpha_mat[self.ref_site, feature_index] = s[feature_index] ** 2 / theta[feature_index]
+                self.alpha_mat_ref_sites[feature_index] = s[feature_index] ** 2 / theta[feature_index]
         else:
             # at least one active features
             if self.active_elements[feature_index] == True and np.sum(self.active_elements) >= 2:
-                self.alpha_mat[self.ref_site, feature_index] = np.PINF
+                self.alpha_mat_ref_sites[feature_index] = np.PINF
 
         return
-
 
 
     def fit_step_growing_RVM(self, confset, target_amplitudes, ref_site,alpha_iterations=None, multiplication=None, weightings=None):
@@ -478,7 +584,7 @@ class QGPSLearningExp(QGPSLearning):
 
         if np.max(self.active_elements) == 0:
             if np.min(abs(np.diag(self.KtK))) < np.finfo(np.float32).eps:
-                self.alpha_mat[self.ref_site, 0] = np.finfo(np.float32).eps
+                self.alpha_mat_ref_sites[0] = np.finfo(np.float32).eps
             else:
                 projections = (abs(self.y) **2 / np.diag(self.KtK))
                 ind = np.argmax(projections)
@@ -486,13 +592,13 @@ class QGPSLearningExp(QGPSLearning):
                 alpha_est = (((np.diag(self.KtK))**2 / (abs(self.y)**2 - np.diag(self.KtK))).real)[ind]
 
                 if alpha_est > 0.:
-                    self.alpha_mat[self.ref_site, ind] = alpha_est
+                    self.alpha_mat_ref_sites[ind] = alpha_est
                     if self.complex_expand and self.epsilon.dtype==complex:
-                        self.alpha_mat[self.ref_site, ind] *= 2
+                        self.alpha_mat_ref_sites[ind] *= 2
                 else:
-                    self.alpha_mat[self.ref_site, ind] = 1.
+                    self.alpha_mat_ref_sites[ind] = 1.
                     if self.complex_expand and self.epsilon.dtype==complex:
-                        self.alpha_mat[self.ref_site, ind] *= 2
+                        self.alpha_mat_ref_sites[ind] *= 2
                     print(alpha_est)
             self.setup_fit_alpha_dep()
 

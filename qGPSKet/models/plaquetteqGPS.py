@@ -37,7 +37,7 @@ class PlaquetteqGPS(nn.Module):
     """
     syms: Union[Callable, Tuple[Callable, Callable]] = no_syms()
     out_transformation: Callable = lambda argument : jnp.sum(argument, axis=(-3,-2,-1))
-    apply_fast_update: bool = True
+    apply_fast_update: bool = False # Careful with zero-valued parameters here, TODO: implement fallback...
 
     def setup(self):
         if type(self.syms) == tuple:
