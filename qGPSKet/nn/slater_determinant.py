@@ -20,8 +20,8 @@ class SlaterDeterminant(nn.Module):
 
         # Initialize U matrix, which has block structure in terms of
         # up and down electrons
-        U_up = self.param("U_up", self.init_fun, (self.n_sites, self.n_elec[0]))
-        U_down = self.param("U_down", self.init_fun, (self.n_sites, self.n_elec[1]))
+        U_up = self.param("U_up", self.init_fun, (self.n_sites, self.n_elec[0]), self.dtype)
+        U_down = self.param("U_down", self.init_fun, (self.n_sites, self.n_elec[1]), self.dtype)
 
         # Compute Slater determinant as product of the determinants of the
         # matrices Ũ_up and Ũ_down, which have rows from U_up and U_down 
