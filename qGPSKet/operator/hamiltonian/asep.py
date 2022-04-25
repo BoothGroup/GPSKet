@@ -2,13 +2,12 @@ import numpy as np
 from numba import jit
 from netket.utils.types import DType
 from netket.operator import DiscreteOperator
-from qGPSKet.hilbert import ASEPDiscreteHilbert
+from netket.hilbert import Qubit
 from qGPSKet.operator.asep import apply_creation, apply_annihilation, apply_hopping, apply_particle_hole
 
 class AsymmetricSimpleExclusionProcess(DiscreteOperator):
-    def __init__(self, hilbert: ASEPDiscreteHilbert, L: int, lambd: float = 0.0, alpha: float = 0.5, beta: float = 0.5, gamma: float = 0.5, delta: float = 0.5, p: float = 0.5, q: float = 0.5):
+    def __init__(self, hilbert: Qubit, lambd: float = 0.0, alpha: float = 0.5, beta: float = 0.5, gamma: float = 0.5, delta: float = 0.5, p: float = 0.5, q: float = 0.5):
         super().__init__(hilbert)
-        self.L = L
         self.lambd = lambd
         self.alpha = alpha
         self.beta = beta
@@ -31,18 +30,18 @@ class AsymmetricSimpleExclusionProcess(DiscreteOperator):
 
     # pad argument is just a dummy atm -> TODO: improve this!
     def get_conn_flattened(self, x, sections, pad=True):
-        x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
-                                                         sections, self.L, self.lambd, self.alpha, self.beta, self.gamma, self.delta, self.p, self.q)
+        x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x), sections, self.lambd, self.alpha, self.beta, self.gamma, self.delta, self.p, self.q)
         return x_primes, mels
 
     @staticmethod
     @jit(nopython=True)
-    def _get_conn_flattened_kernel(x, sections, L, lambd, alpha, beta, gamma, delta, p, q):
+    def _get_conn_flattened_kernel(x, sections, lambd, alpha, beta, gamma, delta, p, q):
         exp_lambd = np.exp(lambd)
         exp_minus_lambd = np.exp(-lambd)
+        L = x.shape[-1]
 
         n_conn = x.shape[0] * 4*(1+L)
-        x_prime = np.empty((n_conn, x.shape[1]), dtype=np.uint8)
+        x_prime = np.empty((n_conn, x.shape[1]), dtype=x.dtype)
         mels = np.empty(n_conn, dtype=np.float64)
 
         count = 0

@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 import netket as nk
-from scipy.sparse.linalg import eigsh
-from qGPSKet.hilbert import ASEPDiscreteHilbert
+from scipy.sparse.linalg import eigs
+from netket.hilbert import Qubit
 from qGPSKet.operator.hamiltonian import AsymmetricSimpleExclusionProcess
 from qGPSKet.models import qGPS, ARqGPS
 from qGPSKet.sampler import ARDirectSampler
@@ -11,23 +11,20 @@ from qGPSKet.nn import normal
 
 # Set up Hilbert space
 L = 10
-hi = ASEPDiscreteHilbert(L)
-
-# Set up lattice
-g = nk.graph.Chain(L, pbc=True)
+hi = Qubit(L)
 
 # Set up ASEP model
-lambd = 0.0
+lambd = 0.2
 alpha = beta = gamma = delta = 0.5
 p = q = 0.5
-ha = AsymmetricSimpleExclusionProcess(hi, L, lambd, alpha, beta, gamma, delta, p, q)
+ha = AsymmetricSimpleExclusionProcess(hi, lambd, alpha, beta, gamma, delta, p, q)
 
 # Use Metropolis-Hastings sampler with hopping rule
-# sa = nk.sampler.MetropolisExchange(hi, graph=g, n_chains_per_rank=1, dtype=jnp.uint8)
-sa = ARDirectSampler(hi, n_chains_per_rank=300, dtype=jnp.uint8)
+# sa = nk.sampler.MetropolisLocal(hi, n_chains_per_rank=1)
+sa = ARDirectSampler(hi, n_chains_per_rank=300)
 
 # Define the model and the variational state
-M = 2
+M = 10
 dtype = jnp.float64
 init_fun = normal(sigma=0.01, dtype=dtype)
 # model = qGPS(hi, M, dtype=dtype)
@@ -43,7 +40,7 @@ sr = nk.optimizer.SR(qgt=qgt, diag_shift=0.01)
 gs = nk.VMC(ha, op, variational_state=vs, preconditioner=sr)
 
 # Compute exact energy
-gs_energy = eigsh(ha.to_linear_operator(), which="LA", k=1, return_eigenvectors=False)
+gs_energy = eigs(ha.to_linear_operator(), which="LR", k=1, return_eigenvectors=False)
 
 # Run optimization
 for it in gs.iter(300,1):
