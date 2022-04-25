@@ -60,11 +60,11 @@ class Slater(nn.Module):
 
         # Evaluate Slater determinants
         def evaluate_determinants(y_t):
-            sd_t = jnp.zeros(x.shape[0])
+            sd_t = jnp.zeros(x.shape[0], dtype=self.dtype)
             for i in range(self.n_determinants):
                 log_sd_i = self._determinants[i](y_t)
                 sd_t = sd_t + jnp.exp(log_sd_i)
-            return jnp.sinh(sd_t) # (B,)
+            return sd_t # (B,)
         sd = jax.vmap(evaluate_determinants, in_axes=-1, out_axes=-1)(y) # (B, T)
 
         # Compute log amplitudes
@@ -119,7 +119,7 @@ class ASymmqGPS(nn.Module):
 
         if self.symmetrization == 'kernel':
             # Evaluate Slater determinants
-            sd = jnp.zeros(x.shape[0])
+            sd = jnp.zeros(x.shape[0], dtype=self.dtype)
             for i in range(self.n_determinants):
                 log_sd_i = jax.vmap(self._determinants[i], in_axes=-1, out_axes=-1)(y) # (B, T)
                 sd = sd + jnp.sum(jnp.exp(log_sd_i), axis=-1)
@@ -129,7 +129,7 @@ class ASymmqGPS(nn.Module):
         elif self.symmetrization == 'projective':
             # Evaluate Slater determinants
             def evaluate_determinants(y_t):
-                sd_t = jnp.zeros(x.shape[0])
+                sd_t = jnp.zeros(x.shape[0], dtype=self.dtype)
                 for i in range(self.n_determinants):
                     log_sd_i = self._determinants[i](y_t)
                     sd_t = sd_t + jnp.exp(log_sd_i)
@@ -188,7 +188,7 @@ class ASymmqGPSProd(nn.Module):
 
         # Evaluate Slater determinants
         def evaluate_determinants(y_t):
-            sd_t = jnp.ones(x.shape[0])
+            sd_t = jnp.ones(x.shape[0], dtype=self.dtype)
             for i in range(self.n_determinants):
                 log_sd_i = self._determinants[i](y_t)
                 sd_t = sd_t * jnp.sinh(jnp.exp(log_sd_i))
@@ -247,7 +247,7 @@ class ASymmqGPSExp(nn.Module):
 
         # Evaluate Slater determinants
         def evaluate_determinants(y_t):
-            sd_t = jnp.zeros(x.shape[0])
+            sd_t = jnp.zeros(x.shape[0], dtype=self.dtype)
             for i in range(self.n_determinants):
                 log_sd_i = self._determinants[i](y_t)
                 sd_t = sd_t + jnp.exp(log_sd_i)
