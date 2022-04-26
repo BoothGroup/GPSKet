@@ -6,6 +6,7 @@ from tqdm import tqdm
 from jax.scipy.special import logsumexp
 from qGPSKet.models import ARqGPS
 
+
 key_in, key_ma = jax.random.split(jax.random.PRNGKey(np.random.randint(0, 100)))
 L = 20
 M = 2
@@ -114,3 +115,17 @@ for l in tqdm(range(L), desc="Test #3.2, constrained"):
 psi_cond = arqgps_symm.apply(variables, inputs, method=ARqGPS.conditionals)
 
 np.testing.assert_allclose(psi_cond_test, psi_cond)
+
+# Test #4
+# Output should be real for real parameters and complex for complex parameters
+dtypes = [jnp.float64, jnp.complex128]
+for dtype in tqdm(dtypes, desc="Test #4"):
+    arqgps_symm = ARqGPS(
+        hi, M,
+        dtype=dtype,
+        to_indices=to_indices,
+        apply_symmetries=apply_symmetries
+    )
+    variables = arqgps_symm.init(key_ma, inputs)
+    log_psi = arqgps_symm.apply(variables, inputs)
+    assert log_psi.dtype == dtype
