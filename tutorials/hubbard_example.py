@@ -5,7 +5,6 @@ from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 from qGPSKet.sampler.fermionic_hopping import MetropolisHopping
 from qGPSKet.operator.hamiltonian import FermiHubbard
 from qGPSKet.models import ASymmqGPS
-from qGPSKet.nn import normal
 
 
 # Set up Hilbert space
@@ -26,14 +25,12 @@ sa = MetropolisHopping(hi, n_chains_per_rank=1)
 # Define the model and the variational state
 n_dets = 2
 dtype = jnp.float64
-init_fun = normal(sigma=0.01, dtype=dtype)
 symmetries = g.automorphisms().to_array().T
 def apply_symmetries(y):
     return jax.vmap(lambda tau: jnp.take(tau, y), in_axes=-1, out_axes=-1)(symmetries)
 model = ASymmqGPS(
     hi, n_dets,
     dtype=dtype,
-    init_fun=init_fun,
     apply_symmetries=apply_symmetries)
 vs = nk.vqs.MCState(sa, model, n_samples=300)
 
@@ -46,7 +43,8 @@ sr = nk.optimizer.SR(qgt=qgt, diag_shift=0.01)
 gs = nk.VMC(ha, op, variational_state=vs, preconditioner=sr)
 
 # Compute exact energy
-gs_energy = nk.exact.lanczos_ed(ha)[0]
+# gs_energy = nk.exact.lanczos_ed(ha)[0]
+gs_energy = -2.048130885722
 
 # Run optimization
 for it in gs.iter(300,1):

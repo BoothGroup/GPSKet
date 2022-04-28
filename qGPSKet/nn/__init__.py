@@ -1,2 +1,2 @@
-from .initializers import normal
+from .initializers import normal, orthogonal
 from .slater_determinant import SlaterDeterminant
