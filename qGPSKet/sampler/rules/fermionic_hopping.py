@@ -3,58 +3,48 @@ import jax.numpy as jnp
 from flax import struct
 from netket.sampler.metropolis import MetropolisRule
 
-def transition_function(key, sample, return_updates=False):
-    sample = sample.astype(jnp.uint8)
-    n_chains = sample.shape[0]
-
-    # pick one of the occupied sites
-    is_occ_up = (sample & 1).astype(bool)
-    is_occ_down = (sample & 2).astype(bool)
-    occupancy_count = is_occ_up.astype(jnp.uint8) + is_occ_down.astype(jnp.uint8)
-
-    keys = jax.random.split(key, num=n_chains)
-
-    def find_electron(occ_up, occ_down, occ, key):
-        keyA, keyB, keyC = jax.random.split(key, num=3)
-        start_site = jax.random.choice(keyA, sample.shape[-1], p=occ)
-        spin_probs = jnp.zeros(2, dtype=bool).at[0].set(occ_up[start_site])
-        spin_probs = spin_probs.at[1].set(occ_down[start_site])
+def transition_function(key, sample, hop_probability, return_updates=False):
+    def apply_electron_hop(samp, key):
+        keyA, keyB, keyC, keyD = jax.random.split(key, num=4)
+        is_occ_up = (samp & 1).astype(bool)
+        is_occ_down = (samp & 2).astype(bool)
+        occ = is_occ_up.astype(jnp.uint8) + is_occ_down.astype(jnp.uint8)
+        hopping_or_exchange = jax.random.choice(keyC, jnp.array([0,1]), p=jnp.array([hop_probability, 1-hop_probability]))
+        occ_prob = jnp.where(hopping_or_exchange==0, occ, jnp.logical_and(occ!=2, occ!=0))
+        start_site = jax.random.choice(keyA, samp.shape[-1], p=occ_prob)
+        spin_probs = jnp.array([is_occ_up[start_site], is_occ_down[start_site]])
         spin = jax.random.choice(keyB, 2, p=spin_probs)+1
-        return (start_site, spin, keyC)
+        target_site_probs = jnp.where(hopping_or_exchange==0, ~((samp & spin).astype(bool)), jnp.logical_and(jnp.logical_and(occ!=2, occ!=0), ~((samp & spin).astype(bool))))
+        target_site = jax.random.choice(keyD, samp.shape[-1], p=target_site_probs)
+        updated_sample = samp.at[start_site].add(-spin)
+        updated_sample = updated_sample.at[target_site].add(spin)
+        def get_exchange(_):
+            updated_sample_exchanged = updated_sample.at[start_site].add(3-spin)
+            return updated_sample_exchanged.at[target_site].add(-(3-spin))
+        return (jax.lax.cond(hopping_or_exchange==0, lambda _: updated_sample, get_exchange, None), start_site, target_site)
 
-    start_sites, spins, new_keys = jax.vmap(find_electron, in_axes=(0,0,0,0), out_axes=(0,0,0))(is_occ_up, is_occ_down, occupancy_count, keys)
+    keys = jax.random.split(key, num=sample.shape[0])
 
-    candidates = ~(sample[start_sites] & spins).astype(bool)
+    updated_sample, start_sites, target_sites = jax.vmap(apply_electron_hop, in_axes=(0, 0), out_axes=(0, 0, 0))(sample, keys)
 
-    def target_site(is_candidate, key):
-        site = jax.random.choice(key, sample.shape[-1], p=is_candidate)
-        return site
-
-    target_sites = jax.vmap(target_site, in_axes=(0, 0), out_axes=0)(candidates, new_keys)
-
-    def scalar_update_fun(sample, start_site, target_site, spin):
-        samplep = sample.at[start_site].add(-spin)
-        samplep = samplep.at[target_site].add(spin)
-        return samplep
-
-    updated_sample = jax.vmap(scalar_update_fun, in_axes=(0, 0, 0, 0), out_axes=0)(sample, start_sites, target_sites, spins)
     if return_updates:
         update_sites = jnp.stack((start_sites, target_sites), axis=-1)
         return (updated_sample, None, update_sites)
     else:
         return (updated_sample, None)
 
-transition_fun_with_update =  lambda key, sample : transition_function(key, sample, return_updates=True)
-
-transition_fun_without_update = lambda key, sample : transition_function(key, sample, return_updates=False)
+transition_fun_with_update = lambda key, sample, hop_probability : transition_function(key, sample, hop_probability, return_updates=True)
+transition_fun_without_update = lambda key, sample, hop_probability : transition_function(key, sample, hop_probability, return_updates=False)
 
 @struct.dataclass
 class FermionicHoppingRule(MetropolisRule):
     """
     Fermionic hopping update rule
     """
+    hop_probability: float = 1.
     def transition(rule, sampler, machine, parameters, state, key, sample):
-        return transition_fun_without_update(key, sample)
+        return transition_fun_without_update(key, sample, rule.hop_probability)
+
 
 @struct.dataclass
 class FermionicHoppingRuleWithUpdates(MetropolisRule):
@@ -62,6 +52,6 @@ class FermionicHoppingRuleWithUpdates(MetropolisRule):
     Fermionic hopping update rule which also returns the list of affected sites
     which is required for the fast metropolis sampler
     """
+    hop_probability: float = 1.
     def transition(rule, sampler, machine, parameters, state, key, sample):
-        return transition_fun_with_update(key, sample)
-
+        return transition_fun_with_update(key, sample, rule.hop_probability)
