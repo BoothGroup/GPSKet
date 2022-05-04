@@ -1,91 +1,70 @@
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
-from typing import Union, List
+from typing import Union
 from netket.utils.types import DType, NNInitFunc, Callable, Array
 from flax import linen as nn
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from qGPSKet.nn.initializers import normal
+from jax.nn.initializers import zeros
+from .autoreg_qGPS import _normalize, AbstractARqGPS
 
 
-class ConditionalqGPS(nn.Module):
-    size: int
-    local_size: int
+class ARqGPSFull(AbstractARqGPS):
+    """
+    Implements the fully variational autoregressive formulation of the QGPS Ansatz,
+    with support for symmetries and Hilbert spaces constrained to the
+    zero magnetization sector.
+    """
+
     M: int
+    """Bond dimension"""
     dtype: DType = jnp.complex128
-    init_fun_context: NNInitFunc = normal(dtype=dtype)
-    init_fun_inputs: NNInitFunc = normal(dtype=dtype)
-    machine_pow: int=2
-
-    @nn.compact
-    def __call__(self, context: Array) -> Array:
-        # Initialize variational parameters
-        context_size = context.shape[-1]
-        context_param = self.param("context", self.init_fun_context, (self.local_size, self.M, context_size), self.dtype)
-        inputs_param = self.param("inputs", self.init_fun_inputs, (self.local_size, self.M), self.dtype)
-
-        # Compute log conditional amplitudes
-        def take_context_val(c):
-            indices = jnp.expand_dims(c, axis=(0, 1))
-            val = jnp.take_along_axis(context_param, indices, axis=0)
-            val = jnp.reshape(val, (self.M, -1))
-            return val
-        context_val = jax.vmap(take_context_val, in_axes=0)(context) # (B, M, L)
-        context_val = jnp.prod(context_val, axis=-1) # (B, M)
-        site_prod = jax.vmap(lambda p: inputs_param*p, in_axes=0)(context_val) # (B, D, M)
-        log_psi = jnp.sum(site_prod, axis=-1) # (B, D)
-        return log_psi # (B, D)
-
-class ARqGPSFull(nn.Module):
-    hilbert: HomogeneousHilbert
-    M: Union[int, List[int]]
-    dtype: DType = jnp.complex128
+    """Type of the variational parameters"""
+    machine_pow: int = 2
+    """Exponent required to normalize the output"""
     init_fun: NNInitFunc = normal(dtype=dtype)
+    """Initializer for the variational parameters"""
     to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
+    """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
-    machine_pow: int=2
+    """Function to apply symmetries to configurations"""
+    # TODO: extend to cases beyond D=2
+    count_spins: Callable = lambda spins : jnp.stack([(spins+1)&1, ((spins+1)&2)/2], axis=-1).astype(jnp.int32)
+    """Function to count down and up spins"""
+    # TODO: extend to cases where total_sz != 0
+    renormalize_log_psi: Callable = lambda n_spins, hilbert, index: jnp.log(jnp.heaviside(hilbert.size//2-n_spins, 0))
+    """Function to renormalize conditional log probabilities"""
 
-    def __post_init__(self):
-        super().__post_init__()
-
-        if not isinstance(self.hilbert, HomogeneousHilbert):
-            raise ValueError(
-                f"Only homogeneous Hilbert spaces are supported by ARNN, but hilbert is a {type(self.hilbert)}."
-            )
+    # Dimensions:
+    # - B = batch size
+    # - D = local dimension
+    # - L = number of sites
+    # - M = bond dimension
+    # - T = number of symmetries
 
     def _conditional(self, inputs: Array, index: int) -> Array:
+        # Convert input configurations into indices
+        inputs = self.to_indices(inputs) # (B, L)
+
         # Compute conditional probability for site at index
-        # log_psi = self._conditional_wavefunctions[index](inputs) # (B, D)
-        # FIXME: this is inefficient, but has similar scaling as the ideal implementation
-        log_psi = _conditionals(self, inputs)[:, index, :]
+        log_psi = _conditional(self, inputs, index) # (B, D)
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
     def conditionals(self, inputs: Array) -> Array:
+        # Convert input configurations into indices
+        inputs = self.to_indices(inputs) # (B, L)
+
         # Compute conditional probabilities for all sites
         log_psi = _conditionals(self, inputs) # (B, L, D)
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
     def setup(self):
-        self.local_dim = self.hilbert.local_size
-        self.n_sites = self.hilbert.size
-        if isinstance(self.M, int):
-            M = [self.M]*self.n_sites
-        else:
-            assert len(self.M) == self.n_sites
-            M = self.M
-        self._conditional_wavefunctions = [
-            ConditionalqGPS(
-                i+1,
-                self.hilbert.local_size,
-                M[i],
-                dtype=self.dtype,
-                init_fun_context=self.init_fun if i>0 else jax.nn.initializers.ones,
-                init_fun_inputs=self.init_fun
-            )
-            for i in range(self.n_sites)
-        ]
+        self._epsilon  = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, self.hilbert.size, self.hilbert.size), self.dtype)
+        if self.hilbert.constrained:
+            self._n_spins = self.variable("cache", "spins", zeros, None, (1, self.hilbert.local_size))
 
     @nn.compact
     def __call__(self, inputs: Array) -> Array:
@@ -114,15 +93,89 @@ class ARqGPSFull(nn.Module):
         log_psi_symm = log_psi_symm_re+1j*log_psi_symm_im
         return log_psi_symm # (B,)
 
+def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable) -> Union[Array, Array]:
+    # Slice inputs at index-1 to count previous spins
+    inputs_i = inputs[:, index-1] # (B,)
+    
+    # Mask out parameters at j>index
+    mask = jnp.triu(jnp.ones((hilbert.size, hilbert.size)), 1)
+
+    # Retrieve input parameters
+    input_param = jnp.asarray(epsilon, epsilon.dtype)[:, :, index, index] # (D, M)
+    input_param = jnp.expand_dims(input_param, axis=0) # (1, D, M)
+
+    # Compute product of parameters over j<index
+    context_param = jnp.asarray(epsilon, epsilon.dtype)[:, :, :, index] * mask[:,index] # (D, M, L)
+    context_param = jnp.expand_dims(context_param, axis=0) # (1, D, M, L)
+    inputs = jnp.expand_dims(inputs, axis=(1,2)) # (B, 1, 1, L)
+    context_val = jnp.take_along_axis(context_param, inputs, axis=1) # (B, 1, M, L)
+    context_val = jnp.where(context_val==0., jnp.ones((1,1,hilbert.size)), context_val)
+    context_prod = jnp.prod(context_val, axis=-1) # (B, 1, M)
+    site_prod = input_param * context_prod # (B, D, M)
+
+    # Compute log conditional probabilities
+    log_psi = jnp.sum(site_prod, axis=-1) # (B, D)
+
+    # Update spins count if index is larger than 0, otherwise leave as is
+    n_spins = jax.lax.cond(
+        index > 0,
+        lambda n_spins: n_spins + count_spins(inputs_i),
+        lambda n_spins: n_spins,
+        n_spins
+    )
+
+    # If Hilbert space associated with the model is constrained, i.e.
+    # model has "n_spins" in "cache" collection, then impose total magnetization.  
+    # This is done by counting number of up/down spins until index, then if
+    # n_spins is >= L/2 the probability of up/down spin at index should be 0,
+    # i.e. the log probability becomes -inf
+    log_psi = jax.lax.cond(
+        index >= 0,
+        lambda log_psi: log_psi+renormalize_log_psi(n_spins, hilbert, index),
+        lambda log_psi: log_psi,
+        log_psi
+    )
+    return n_spins, log_psi
+
+def _conditional(model: ARqGPSFull, inputs: Array, index: int) -> Array:
+    # Retrieve spins count
+    batch_size = inputs.shape[0]
+    if model.has_variable("cache", "spins"):
+        n_spins = model._n_spins.value
+        n_spins = jnp.asarray(n_spins, jnp.int32)
+        n_spins = jnp.resize(n_spins, (batch_size, model.hilbert.local_size)) # (B, D)
+    else:
+        n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
+
+    # Compute log conditional probabilities
+    n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
+    log_psi = _normalize(log_psi, model.machine_pow)
+
+    # Update model cache
+    if model.has_variable("cache", "spins"):
+        model._n_spins.value = n_spins
+    return log_psi # (B, D)
 
 def _conditionals(model: ARqGPSFull, inputs: Array) -> Array:
+    # Loop over sites while computing log conditional probabilities
+    def _scan_fun(n_spins, index):
+        n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
+        n_spins = jax.lax.cond(
+            model.hilbert.constrained,
+            lambda n_spins: n_spins,
+            lambda n_spins: jnp.zeros_like(n_spins),
+            n_spins
+        )
+        return n_spins, log_psi
+
     batch_size = inputs.shape[0]
-    log_psi = jnp.zeros((batch_size, model.n_sites, model.local_dim), model.dtype)
-    context = jnp.expand_dims(inputs[:, 0], axis=1)
-    log_psi_cond = model._conditional_wavefunctions[0](context)
-    log_psi.at[:, 0, :].set(log_psi_cond)
-    for index in range(1, model.n_sites):
-        context = inputs[:, :index]
-        log_psi_cond = model._conditional_wavefunctions[index](context)
-        log_psi.at[:, index, :].set(log_psi_cond)
-    return log_psi
+    n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
+    indices = jnp.arange(model.hilbert.size)
+    _, log_psi = jax.lax.scan(
+        _scan_fun,
+        n_spins,
+        indices
+    )
+    log_psi = jnp.transpose(log_psi, [1, 0, 2])
+    log_psi = _normalize(log_psi, model.machine_pow)
+    return log_psi # (B, L, D)
