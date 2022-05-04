@@ -411,33 +411,36 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 
                         def inner_loop_unocc(arg):
                             b = unocc_inds_outer_removed[arg[0]]
+                            def get_val(_):
+                                new_occ_inner = jnp.array([sample[j]-spin_int, sample[b]+spin_int], dtype=jnp.uint8)
+                                update_sites_inner = jnp.array([j, b])
 
-                            new_occ_inner = jnp.array([sample[j]-spin_int, sample[b]+spin_int], dtype=jnp.uint8)
-                            update_sites_inner = jnp.array([j, b])
+                                # Get parity multiplicator for second hop (this does not take first hop into account)
+                                parity_multiplicator_inner = get_parity_multiplicator_hop(update_sites_inner, el_count)
 
-                            # Get parity multiplicator for second hop (this does not take first hop into account)
-                            parity_multiplicator_inner = get_parity_multiplicator_hop(update_sites_inner, el_count)
+                                parity_multiplicator = parity_multiplicator_outer * parity_multiplicator_inner
 
-                            parity_multiplicator = parity_multiplicator_outer * parity_multiplicator_inner
+                                # Evaluate the modification required to include the first hop
+                                limits_inner = jnp.sort(update_sites_inner)
+                                left_lim = limits_inner[0]
+                                right_lim = (limits_inner[1]-1)
+                                parity_multiplicator = jax.lax.cond((i <= right_lim) & (i > left_lim), lambda x: -x,
+                                                                    lambda x: x, parity_multiplicator)
+                                parity_multiplicator = jax.lax.cond((a <= right_lim) & (a > left_lim), lambda x: -x,
+                                                                    lambda x: x, parity_multiplicator)
 
-                            # Evaluate the modification required to include the first hop
-                            limits_inner = jnp.sort(update_sites_inner)
-                            left_lim = limits_inner[0]
-                            right_lim = (limits_inner[1]-1)
-                            parity_multiplicator = jax.lax.cond((i <= right_lim) & (i > left_lim), lambda x: -x,
-                                                                lambda x: x, parity_multiplicator)
-                            parity_multiplicator = jax.lax.cond((a <= right_lim) & (a > left_lim), lambda x: -x,
-                                                                lambda x: x, parity_multiplicator)
+                                # Combined update to the config
+                                new_occ = jnp.concatenate((new_occ_outer, new_occ_inner))
+                                update_sites = jnp.concatenate((update_sites_outer, update_sites_inner))
 
-                            # Combined update to the config
-                            new_occ = jnp.concatenate((new_occ_outer, new_occ_inner))
-                            update_sites = jnp.concatenate((update_sites_outer, update_sites_inner))
+                                # Get amplitude ratio
+                                log_amp_connected = get_connected_log_amp(new_occ, update_sites)
+                                amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
 
-                            # Get amplitude ratio
-                            log_amp_connected = get_connected_log_amp(new_occ, update_sites)
-                            amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                                return (eri[i,a,j,b] * parity_multiplicator * amp_ratio).astype(complex)
+                            value = jax.lax.cond(eri[i,a,j,b] != 0., get_val, lambda _: jnp.array(0., dtype=complex), None)
 
-                            return (arg[0] + 1, arg[1] + eri[i,a,j,b] * parity_multiplicator * amp_ratio)
+                            return (arg[0] + 1, arg[1] + value)
                         return (arg[0] + 1, jax.lax.while_loop(inner_unocc_cond, inner_loop_unocc, (0, arg[1]))[1])
                     return (arg[0] + 1, jax.lax.while_loop(inner_occ_cond, inner_loop_occ, (0, arg[1]))[1])
                 return (arg[0] + 1, jax.lax.while_loop(unocc_cond, outer_loop_unocc, (0, arg[1]))[1])
@@ -502,21 +505,24 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                     def down_loop_unocc(arg):
                         b = down_unocc_inds[arg[0]]
 
-                        new_occ_final, update_sites_final = get_updated_occ_previous_move(new_occ_updated, update_sites_updated, b, 2)
-                        """Now update_sites_final is the list of sites where the occupancy changes,
-                        new_occ_final holds the corresponding updated occupancies at these sites"""
+                        def get_val(_):
+                            new_occ_final, update_sites_final = get_updated_occ_previous_move(new_occ_updated, update_sites_updated, b, 2)
+                            """Now update_sites_final is the list of sites where the occupancy changes,
+                            new_occ_final holds the corresponding updated occupancies at these sites"""
 
-                        # Get parity multiplicator second hop
-                        parity_multiplicator_down = get_parity_multiplicator_hop(jnp.array((j, b)), down_count)
+                            # Get parity multiplicator second hop
+                            parity_multiplicator_down = get_parity_multiplicator_hop(jnp.array((j, b)), down_count)
 
-                        parity_multiplicator = parity_multiplicator_up * parity_multiplicator_down
+                            parity_multiplicator = parity_multiplicator_up * parity_multiplicator_down
 
-                        # Get amplitude ratio
-                        log_amp_connected = get_connected_log_amp(new_occ_final, update_sites_final)
-                        amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                            # Get amplitude ratio
+                            log_amp_connected = get_connected_log_amp(new_occ_final, update_sites_final)
+                            amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                            return (eri[i,a,j,b] * parity_multiplicator * amp_ratio).astype(complex)
 
-                        value = arg[1] + eri[i,a,j,b] * parity_multiplicator * amp_ratio
-                        return (arg[0] + 1, value)
+                        value = jax.lax.cond(eri[i,a,j,b] != 0., get_val, lambda _: jnp.array(0., dtype=complex), None)
+
+                        return (arg[0] + 1, arg[1] + value)
                     return (arg[0] + 1, jax.lax.while_loop(down_unocc_cond, down_loop_unocc, (0, arg[1]))[1])
                 return (arg[0] + 1, jax.lax.while_loop(down_occ_cond, down_loop_occ, (0, arg[1]))[1])
             return (arg[0] + 1, jax.lax.while_loop(up_unocc_cond, up_loop_unocc, (0, arg[1]))[1])

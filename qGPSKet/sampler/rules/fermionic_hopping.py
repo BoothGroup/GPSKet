@@ -16,6 +16,8 @@ def transition_function(key, sample, hop_probability, return_updates=False):
         spin = jax.random.choice(keyB, 2, p=spin_probs)+1
         target_site_probs = jnp.where(hopping_or_exchange==0, ~((samp & spin).astype(bool)), jnp.logical_and(jnp.logical_and(occ!=2, occ!=0), ~((samp & spin).astype(bool))))
         target_site = jax.random.choice(keyD, samp.shape[-1], p=target_site_probs)
+        # Make sure no unallowed move is applied
+        target_site = jnp.where(target_site_probs[target_site]==False, start_site, target_site)
         updated_sample = samp.at[start_site].add(-spin)
         updated_sample = updated_sample.at[target_site].add(spin)
         def get_exchange(_):
