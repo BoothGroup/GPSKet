@@ -170,7 +170,9 @@ class qGPS(nn.Module):
             site_product_save.value = site_product
             if update_sites is not None:
                 def update_fun(saved_config, update_sites, occs):
-                    return saved_config.at[update_sites].set(occs)
+                    def scan_fun(carry, count):
+                        return (carry.at[update_sites[count]].set(occs[count]), None)
+                    return jax.lax.scan(scan_fun, saved_config, jnp.arange(update_sites.shape[0]), reverse=True)[0]
                 indices_save.value = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
             else:
                 indices_save.value = indices
