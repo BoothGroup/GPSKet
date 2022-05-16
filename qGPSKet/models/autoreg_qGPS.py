@@ -7,7 +7,6 @@ from flax import linen as nn
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from jax.nn.initializers import zeros, ones
-import numpy as np
 from qGPSKet.nn.initializers import normal
 
 
@@ -76,9 +75,8 @@ class AbstractARqGPS(nn.Module):
 
 class ARqGPS(AbstractARqGPS):
     """
-    Implements the autoregressive formulation of the QGPS Ansatz,
-    with support for symmetries and Hilbert spaces constrained to the
-    zero magnetization sector.
+    Implements the autoregressive formulation of the QGPS Ansatz with weight sharing,
+    support for symmetries and Hilbert spaces constrained to the zero magnetization sector.
     """
 
     M: int
@@ -140,7 +138,7 @@ class ARqGPS(AbstractARqGPS):
         n_symm = inputs.shape[-1]
 
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L)
+        inputs = self.to_indices(inputs) # (B, L, T)
         batch_size = inputs.shape[0]
 
         # Compute conditional log-probabilities
@@ -182,7 +180,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     )
 
     # Compute log conditional probabilities
-    log_psi = jnp.sum(prods, axis=-1)
+    log_psi = jnp.sum(prods, axis=-1) # (B, D)
 
     # Update spins count if index is larger than 0, otherwise leave as is
     n_spins = jax.lax.cond(
