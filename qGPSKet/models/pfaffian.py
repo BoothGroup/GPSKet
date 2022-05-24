@@ -2,9 +2,15 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 from netket.utils.types import Array, DType, Callable
+from typing import Tuple
+from netket.utils import HashableArray
 from jax.nn.initializers import normal
 from flax import linen as nn
 
+
+def get_gauss_leg_elements_Sy(n_grid):
+    x, w = np.polynomial.legendre.leggauss(n_grid)
+    return (HashableArray(np.arccos(x)), HashableArray(w))
 
 """
 This implements a Pfaffian of a matrix as exemplified on WikiPedia, there are certainly better ways which we should adapt in the future,
@@ -54,16 +60,33 @@ This implementation does not check if the Hilbert used actually space satisfies 
 so a little bit of care is required if this state makes sense.
 The states which are fed into this model are assumed to be in the same representation as for the general pfaffian state
 (i.e. positions take values between 1 and 2 L).
+This model can also easily be projected onto an S^2 eigenstate via a Gauss-Legendre quadrature of the integral in the projector.
+See e.g. the mVMC paper [https://doi.org/10.1016/j.cpc.2018.08.014] where this is explained in detail
+(comment YR: I am pretty convinced that there is a (-) sign missing in Eq. (53) of that manuscript, implementation below should be correct)
+TODO: Test the symmetrization more extensively.
 TODO: Implement sanity checks for this model.
+TODO: Add documentation for symmetrization interface (+maybe find a more general way of defining it)
 """
 class ZeroMagnetizationPfaffian(PfaffianState):
+    # S2_projection is a tuple where the first element gives the rotation angles for the Sy rotation
+    # and the second element are the corresponding characters which should be used
+    S2_projection: Tuple[HashableArray, HashableArray] = (HashableArray(np.array([0.])), HashableArray(np.array([1.])))
+    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(-1))
     @nn.compact
     def __call__(self, y) -> Array:
         n_e_half = y.shape[-1]//2
         f = self.param("f", self.init_fun, (self.n_sites, self.n_sites), self.dtype)
-        f_occ = jnp.take(f, y[:, :n_e_half], axis=0)
-        take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
-        f_occ = jax.vmap(take_fun)(f_occ, y[:, n_e_half:]-self.n_sites)
-        F_skew = jnp.block([[jnp.zeros((n_e_half, n_e_half)), f_occ], [-jnp.swapaxes(f_occ, 1, 2), jnp.zeros((n_e_half, n_e_half))]])
-        return jax.vmap(log_pfaffian)(F_skew)
+        def evaluate_pfaff_rotations(angle):
+            F = jnp.block([[-f * jnp.cos(angle/2) * jnp.sin(angle/2), f * jnp.cos(angle/2) * jnp.cos(angle/2)],
+                           [-f * jnp.sin(angle/2) * jnp.sin(angle/2), f * jnp.cos(angle/2) * jnp.sin(angle/2)]])
+            F_occ = jnp.take(F, y, axis=0)
+            take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
+            F_occ = jax.vmap(take_fun)(F_occ, y)
+            F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
+            return jax.vmap(log_pfaffian)(F_skew)
+
+        vals = jax.vmap(evaluate_pfaff_rotations, out_axes=-1)(jnp.array(self.S2_projection[0]))
+        vals += jnp.log(jnp.asarray(self.S2_projection[1]))
+
+        return self.out_transformation(vals)
 
