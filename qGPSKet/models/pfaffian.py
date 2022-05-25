@@ -13,8 +13,7 @@ def get_gauss_leg_elements_Sy(n_grid):
     return (HashableArray(np.arccos(x)), HashableArray(w))
 
 
-# Legacy implementation which is slow, maybe it would be worth re-activating the custom derivative rule but
-# with the implementation below AD seems to be pretty much as fast as defining the derivative by hand
+# Legacy implementation which is slow
 # """
 # This implements a Pfaffian of a matrix as exemplified on WikiPedia, there are certainly better ways which we should adapt in the future,
 # the derivation of this on WikiPedia does not explain why the trace identity can be carried over to non-positive matrices but the code seems to work.
@@ -29,47 +28,45 @@ def get_gauss_leg_elements_Sy(n_grid):
 #     vals = jnp.linalg.eigvals(jnp.dot(jnp.kron(pauli_y, jnp.eye(n)).T, mat))
 #     return (0.5 * jnp.sum(jnp.log(vals)) + jnp.log(1.j) * (n**2))
 
-# @log_pfaffian.defjvp
-# def log_pfaffian_jvp(primals, tangents):
-#     derivative = 0.5 * jnp.linalg.inv(primals[0]).T
-#     return (log_pfaffian(primals[0]), derivative.flatten().dot(tangents[0].flatten()))
-
 
 
 """
 This implements the Pfaffian based on the Parlett-Reid algorithm as outlined in arxiv:1102.3440,
 this implementation also borrows heavily from the corresponding codebase (pfapack, https://github.com/basnijholt/pfapack)
 and is essentially just a reimplementation of its pfaffian_LTL method in jax.
-The stabilization is disabled by default which makes the calculation a bit faster (TODO: we need more testing
-how much of a difference it actually makes).
 The current implementation involves a for loop which will likely lead to sub-optimal compilation times when jitting this
 but currently this seems to be the best solution to get around the jax limitations of requiring static loop counts.
 """
-def log_pfaffian(mat, stabilize=False):
+@jax.custom_jvp
+def log_pfaffian(mat):
     # TODO: add some sanity checks here
     n = mat.shape[0]//2
     matrix = mat.astype(jnp.complex128)
     value = 0.
     for count in range(n):
         index = count * 2
-        if stabilize:
-            # # permute rows/cols for numerical stability
-            largest_index = jnp.argmax(jnp.abs(mat[index+1:,index]))
-            # exchange rows and columns
-            updated_mat = matrix.at[index + 1, index:].set(matrix[index + largest_index + 1, index:])
-            updated_mat = updated_mat.at[index + largest_index + 1, index:].set(matrix[index+1, index:])
-            matrix = updated_mat
-            updated_mat = matrix.at[index:, index + 1].set(matrix[index:, index + largest_index + 1])
-            updated_mat = updated_mat.at[index:, index + largest_index + 1].set(updated_mat[index:, index+1])
-            matrix = updated_mat
-            # sign picked up
-            value += jnp.where(largest_index != 0, jnp.log(-1 + 0.j), 0.)
+        # permute rows/cols for numerical stability
+        largest_index = jnp.argmax(jnp.abs(matrix[index+1:,index]))
+        # exchange rows and columns
+        updated_mat = matrix.at[index + 1, index:].set(matrix[index + largest_index + 1, index:])
+        updated_mat = updated_mat.at[index + largest_index + 1, index:].set(matrix[index+1, index:])
+        matrix = updated_mat
+        updated_mat = matrix.at[index:, index + 1].set(matrix[index:, index + largest_index + 1])
+        updated_mat = updated_mat.at[index:, index + largest_index + 1].set(matrix[index:, index+1])
+        matrix = updated_mat
+        # sign picked up
+        value += jnp.where(largest_index != 0, jnp.log(-1 + 0.j), 0.)
         # value update
         value = jnp.where(matrix[index+1, index] !=  0., value + jnp.log(matrix[index, index+1]), jnp.NINF + 0.j)
         t = matrix[index, (index + 2):]/matrix[index, index+1]
         matrix = matrix.at[index + 2:, index + 2:].add(jnp.outer(t, matrix[index + 2:, index + 1]))
         matrix = matrix.at[index + 2:, index + 2:].add(-jnp.outer(matrix[index + 2:, index + 1], t))
     return value
+
+@log_pfaffian.defjvp
+def log_pfaffian_jvp(primals, tangents):
+    derivative = 0.5 * jnp.linalg.inv(primals[0]).T
+    return (log_pfaffian(primals[0]), derivative.flatten().dot(tangents[0].flatten()))
 
 
 """
