@@ -79,14 +79,18 @@ class PfaffianState(nn.Module):
     n_sites : int
     init_fun: Callable = normal()
     dtype: DType =jnp.complex128
+    symmetries: Callable = lambda y: jnp.expand_dims(y, axis=-1)
     @nn.compact
     def __call__(self, y) -> Array:
         F = self.param("F", self.init_fun, (2 * self.n_sites, 2 * self.n_sites), self.dtype)
-        F_occ = jnp.take(F, y, axis=0)
-        take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
-        F_occ = jax.vmap(take_fun)(F_occ, y)
-        F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
-        return jax.vmap(log_pfaffian)(F_skew)
+        y = self.symmetries(y)
+        def evaluate_symmetries(y_sym):
+            F_occ = jnp.take(F, y_sym, axis=0)
+            take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
+            F_occ = jax.vmap(take_fun)(F_occ, y_sym)
+            F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
+            return jax.vmap(log_pfaffian)(F_skew)
+        return jax.scipy.special.logsumexp(jax.vmap(evaluate_symmetries, in_axes=-1, out_axes=-1)(y), axis=-1)
 
 
 """
@@ -107,22 +111,25 @@ class ZeroMagnetizationPfaffian(PfaffianState):
     # S2_projection is a tuple where the first element gives the rotation angles for the Sy rotation
     # and the second element are the corresponding characters which should be used
     S2_projection: Tuple[HashableArray, HashableArray] = (HashableArray(np.array([0.])), HashableArray(np.array([1.])))
-    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(-1))
+    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(-2, -1))
     @nn.compact
     def __call__(self, y) -> Array:
         n_e_half = y.shape[-1]//2
         f = self.param("f", self.init_fun, (self.n_sites, self.n_sites), self.dtype)
+        y = self.symmetries(y)
         def evaluate_pfaff_rotations(angle):
             F = jnp.block([[-f * jnp.cos(angle/2) * jnp.sin(angle/2), f * jnp.cos(angle/2) * jnp.cos(angle/2)],
                            [-f * jnp.sin(angle/2) * jnp.sin(angle/2), f * jnp.cos(angle/2) * jnp.sin(angle/2)]])
-            F_occ = jnp.take(F, y, axis=0)
-            take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
-            F_occ = jax.vmap(take_fun)(F_occ, y)
-            F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
-            return jax.vmap(log_pfaffian)(F_skew)
+            def evaluate_symmetries(y_sym):
+                F_occ = jnp.take(F, y_sym, axis=0)
+                take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
+                F_occ = jax.vmap(take_fun)(F_occ, y_sym)
+                F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
+                return jax.vmap(log_pfaffian)(F_skew)
+            return jax.vmap(evaluate_symmetries, in_axes=-1, out_axes=-1)(y)
 
-        vals = jax.vmap(evaluate_pfaff_rotations, out_axes=-1)(jnp.array(self.S2_projection[0]))
-        vals += jnp.log(jnp.asarray(self.S2_projection[1]))
+        vals = jax.vmap(evaluate_pfaff_rotations, out_axes=-2)(jnp.array(self.S2_projection[0]))
+        vals += jnp.log(jnp.asarray(self.S2_projection[1])).reshape((-1,1))
 
         return self.out_transformation(vals)
 
