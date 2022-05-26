@@ -97,9 +97,7 @@ class qGPS(nn.Module):
             self.symmetries_inverse = self.syms[1]
         else:
             self.symmetries = self.syms
-            if self.apply_fast_update:
-                warnings.warn("Attention! Fast updating is not applied in qGPS as the inverse symmetry operations are not supplied.")
-            self.apply_fast_update = False
+            assert (not self.apply_fast_update)
         self.L = self.hilbert.size
         self.local_dim = self.hilbert.local_size
 
