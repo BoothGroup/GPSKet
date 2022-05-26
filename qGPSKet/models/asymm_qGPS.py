@@ -142,10 +142,13 @@ class ASymmqGPSProd(nn.Module):
             return log_psi.real
 
 def _evaluate_determinants(model : nn.Module, y_t : Array) -> Array:
+    # FIXME: this implementation works only for the zero magnetization case,
+    # since in that case the number of spin-up and -down electrons is always equal, and so
+    # the slicing in lines 148 and 149 works even for spin-flip configurations
     Ũ_up = jnp.take(model.orbitals_up, y_t[:, :model.n_elec[0]], axis=1) # (M, B, N_up, N_up)
     Ũ_down = jnp.take(model.orbitals_down, y_t[:, model.n_elec[0]:], axis=1) # (M, B, N_down, N_down)
     # Compute log of det with sign
-    # N.B.: always returns a complex number, even for real parameters
+    # NOTE: always returns a complex number, even for real parameters
     (s_up, log_det_up) = jnp.linalg.slogdet(Ũ_up)
     (s_down, log_det_down) = jnp.linalg.slogdet(Ũ_down)
     log_sd = log_det_up + log_det_down + jnp.log(s_up*s_down+0j)
