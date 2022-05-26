@@ -80,6 +80,7 @@ class PfaffianState(nn.Module):
     init_fun: Callable = normal()
     dtype: DType =jnp.complex128
     symmetries: Callable = lambda y: jnp.expand_dims(y, axis=-1)
+    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(-2, -1))
     @nn.compact
     def __call__(self, y) -> Array:
         F = self.param("F", self.init_fun, (2 * self.n_sites, 2 * self.n_sites), self.dtype)
@@ -90,7 +91,14 @@ class PfaffianState(nn.Module):
             F_occ = jax.vmap(take_fun)(F_occ, y_sym)
             F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
             return jax.vmap(log_pfaffian)(F_skew)
-        return jax.scipy.special.logsumexp(jax.vmap(evaluate_symmetries, in_axes=-1, out_axes=-1)(y), axis=-1)
+        out = jax.vmap(evaluate_symmetries, in_axes=-1, out_axes=-1)(y)
+        """
+        because we don't suport the spin rotations in the S^2 projection for this state (yet),
+        we expand the dimensions to mimick a zero angle spin rotation. This way the
+        self.out_transformation has the same meaning for this state as for the ZeroMagnetizationPfaffian
+        below.
+        """
+        return self.out_transformation(out)
 
 
 """
@@ -111,7 +119,6 @@ class ZeroMagnetizationPfaffian(PfaffianState):
     # S2_projection is a tuple where the first element gives the rotation angles for the Sy rotation
     # and the second element are the corresponding characters which should be used
     S2_projection: Tuple[HashableArray, HashableArray] = (HashableArray(np.array([0.])), HashableArray(np.array([1.])))
-    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(-2, -1))
     @nn.compact
     def __call__(self, y) -> Array:
         n_e_half = y.shape[-1]//2
