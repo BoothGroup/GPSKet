@@ -1,8 +1,5 @@
-import jax
 import jax.numpy as jnp
-from typing import Tuple
 from flax import linen as nn
-from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import Array, Callable, DType, NNInitFunc
 from .slater import Slater
 from ..hilbert.discrete_fermion import FermionicDiscreteHilbert
