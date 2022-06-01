@@ -146,6 +146,7 @@ class qGPS(nn.Module):
         if cache_intermediates:
             self.variable("intermediates_cache", "site_prod", lambda : None).value = site_product
 
+            indices_save = self.variable("intermediates_cache", "samples", lambda : None)
             if update_sites is not None:
                 def update_fun(saved_config, update_sites, occs):
                     def scan_fun(carry, count):
@@ -155,6 +156,6 @@ class qGPS(nn.Module):
             else:
                 full_samples = indices
 
-            self.variable("intermediates_cache", "samples", lambda : None).value = full_samples
+            indices_save.value = full_samples
 
         return self.out_transformation(site_product)
