@@ -116,29 +116,9 @@ class qGPS(nn.Module):
 
         epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, self.L), self.dtype)
 
-        if cache_intermediates or (update_sites is not None):
-            site_product_save = self.variable("intermediates_cache", "site_prod", lambda : jnp.zeros(0, dtype=self.dtype))
-            indices_save = self.variable("intermediates_cache", "samples", lambda : jnp.zeros(0, dtype=indices.dtype))
-
-        def no_fast_update(indices):
-            if update_sites is not None:
-                def update_fun(saved_config, update_sites, occs):
-                    return saved_config.at[update_sites].set(occs)
-                indices = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
-
-            def evaluate_site_product(sample):
-                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1).reshape(-1)
-
-            def get_site_prod(sample):
-                return jax.vmap(evaluate_site_product, in_axes=-1, out_axes=-1)(self.symmetries(sample))
-
-            transformed_samples = jnp.expand_dims(indices, (1, 2)) # required for the inner take_along_axis
-            return jax.vmap(get_site_prod)(transformed_samples)
-
-        def valid_fast_update(indices):
-            site_product_old = site_product_save.value
-            new_samples = indices
-            old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save.value, update_sites)
+        if update_sites is not None:
+            indices_save = self.variable("intermediates_cache", "samples", lambda : None).value
+            old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save, update_sites)
 
             def inner_site_product_update(site_prod_old, new_occs, old_occs, sites):
                 site_prod_new = site_prod_old / (epsilon[old_occs,:,sites].prod(axis=0))
@@ -148,31 +128,34 @@ class qGPS(nn.Module):
             def outer_site_product_update(site_prod_old, sample_new, sample_old, update_sites):
                 inv_sym_new, inv_sym_sites = self.symmetries_inverse(sample_new, update_sites)
                 inv_sym_old, inv_sym_sites = self.symmetries_inverse(sample_old, update_sites)
-
                 return jax.vmap(inner_site_product_update, in_axes=(-1, -1, -1, -1), out_axes=-1)(site_prod_old, inv_sym_new, inv_sym_old, inv_sym_sites)
 
-            return jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_product_old, new_samples, old_samples, update_sites)
-
-        """
-        This check if the fast update can be applied is very crude if multiple configs
-        are contained in the batch (currently we only do fast updating with a single
-        config at a time so it's fine).
-        """
-        if update_sites is not None:
-            fast_update = (jnp.min(jnp.abs(epsilon[:,:,update_sites])) > 1.e-14)
-            site_product = jax.lax.cond(fast_update, valid_fast_update, no_fast_update, indices)
+            site_product_old = self.variable("intermediates_cache", "site_prod", lambda : None).value
+            site_product = jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_product_old, indices, old_samples, update_sites)
         else:
-            site_product = no_fast_update(indices)
+            def evaluate_site_product(sample):
+                return jnp.take_along_axis(epsilon, sample, axis=0).prod(axis=-1).reshape(-1)
+
+            def get_site_prod(sample):
+                return jax.vmap(evaluate_site_product, in_axes=-1, out_axes=-1)(self.symmetries(sample))
+
+            transformed_samples = jnp.expand_dims(indices, (1, 2)) # required for the inner take_along_axis
+
+            site_product = jax.vmap(get_site_prod)(transformed_samples)
 
         if cache_intermediates:
-            site_product_save.value = site_product
+            self.variable("intermediates_cache", "site_prod", lambda : None).value = site_product
+
+            indices_save = self.variable("intermediates_cache", "samples", lambda : None)
             if update_sites is not None:
                 def update_fun(saved_config, update_sites, occs):
                     def scan_fun(carry, count):
                         return (carry.at[update_sites[count]].set(occs[count]), None)
                     return jax.lax.scan(scan_fun, saved_config, jnp.arange(update_sites.shape[0]), reverse=True)[0]
-                indices_save.value = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
+                full_samples = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
             else:
-                indices_save.value = indices
+                full_samples = indices
+
+            indices_save.value = full_samples
 
         return self.out_transformation(site_product)
