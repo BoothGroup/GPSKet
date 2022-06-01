@@ -6,7 +6,6 @@ from typing import Tuple, Optional
 from qGPSKet.hilbert import FermionicDiscreteHilbert
 from netket.utils.types import Array, Callable, DType, NNInitFunc
 from netket.utils import HashableArray
-from .asymm_qGPS import occupancies_to_electrons, _evaluate_determinants
 from functools import partial
 
 # Dimensions:
@@ -18,6 +17,29 @@ from functools import partial
 # - M = number of determinants
 # - S = number of spin rotations for S^2 projection
 # - T = number of symmetries
+
+def occupancies_to_electrons(x : Array, n_elec : Tuple[int, int]) -> Array:
+    """
+    Converts input configs from 2nd quantized representation x to 1st quantized representation y:
+        x=[x_1, x_2, ..., x_L]
+                    |
+                    v
+        y=(y_1, y_2, ..., y_{N_up}, y_{N_up+1}, y_{N_up+2}, ..., y_{N_up+N_down})
+
+    Args:
+        x : an array of input configurations in 2nd quantization of shape (B, L)
+        n_elec : a tuple of ints N_up and N_down specifying the number of spin-up and spin-down electrons
+
+    Returns:
+        y : input configurations transformed into 1st quantization representation (B, N_up+N_down)
+    """
+    batch_size = x.shape[0]
+    _, y_up = jnp.nonzero(x&1, size=batch_size*n_elec[0])
+    _, y_down = jnp.nonzero((x&2)/2, size=batch_size*n_elec[1])
+    y_up = jnp.reshape(y_up, (batch_size, -1))
+    y_down = jnp.reshape(y_down, (batch_size, -1))
+    y = jnp.column_stack([y_up, y_down])
+    return y
 
 class Slater(nn.Module):
     """
