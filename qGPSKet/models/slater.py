@@ -129,10 +129,15 @@ class Slater(nn.Module):
             y = occupancies_to_electrons(x, self.hilbert._n_elec)
             y = self.symmetries(y).at[:, self.hilbert._n_elec[0]:, :].add(n_sites) # From now on a position >= L correspond to the spin-down orbitals
 
-            # Construct the sub-matrices where the rows of unoccupied sites have been removed
-            inner_take_over_rotations = jax.vmap(partial(jnp.take, axis=1), in_axes=(-1, None), out_axes=-1) # vmap over rotations
-            U_submats_per_sample = jax.vmap(inner_take_over_rotations, in_axes=(None, -1), out_axes=-1) # vmap over symmetries
-            U_submats = jax.vmap(U_submats_per_sample, in_axes=(None, 0), out_axes=0)(full_U, y) # vmap over batch
+            # Expand the dimension so that we can do the indexing with jnp.take_along_axis
+            y = jnp.expand_dims(y, axis=(1, 3, -2))
+            full_U = jnp.expand_dims(full_U, axis=(0,-1))
+
+            """Construct the sub-matrices where the rows of unoccupied sites have been removed.
+            An earlier version did this with vmaps which did however lead to inexplicable issues when calculations were run
+            with multiple processes on GPUs. TODO: The vmap issue should be investigated further but so far no
+            progress has been made with this."""
+            U_submats = jnp.take_along_axis(full_U, y, axis=2) # (B, M, N, N, S, T)
 
             # Now evaluate the determinants
             def evaluate_SD(U_submat):
