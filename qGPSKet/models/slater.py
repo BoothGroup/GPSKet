@@ -130,14 +130,14 @@ class Slater(nn.Module):
             y = self.symmetries(y).at[:, self.hilbert._n_elec[0]:, :].add(n_sites) # From now on a position >= L correspond to the spin-down orbitals
 
             # Expand the dimension so that we can do the indexing with jnp.take_along_axis
-            y = jnp.expand_dims(y, axis=(1, 3, -2))
-            full_U = jnp.expand_dims(full_U, axis=(0,-1))
+            y_expanded = jnp.expand_dims(y, axis=(1, 3, -2))
+            full_U_expanded = jnp.expand_dims(full_U, axis=(0,-1))
 
             """Construct the sub-matrices where the rows of unoccupied sites have been removed.
             An earlier version did this with vmaps which did however lead to inexplicable issues when calculations were run
             with multiple processes on GPUs. TODO: The vmap issue should be investigated further but so far no
             progress has been made with this."""
-            U_submats = jnp.take_along_axis(full_U, y, axis=2) # (B, M, N, N, S, T)
+            U_submats = jnp.take_along_axis(full_U_expanded, y_expanded, axis=2) # (B, M, N, N, S, T)
 
             # Now evaluate the determinants
             def evaluate_SD(U_submat):
