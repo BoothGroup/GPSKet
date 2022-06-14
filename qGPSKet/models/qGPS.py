@@ -155,7 +155,7 @@ class qGPS(nn.Module):
                     def scan_fun(carry, count):
                         return (carry.at[update_sites[count]].set(occs[count]), None)
                     return jax.lax.scan(scan_fun, saved_config, jnp.arange(update_sites.shape[0]), reverse=True)[0]
-                full_samples = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
+                full_samples = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(saved_configs.value, update_sites, indices)
             else:
                 full_samples = indices
 
