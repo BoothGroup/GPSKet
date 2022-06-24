@@ -34,6 +34,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
 
     samples, counts = vstate.samples
     samples = samples.reshape((-1, samples.shape[-1]))
+    counts = counts.reshape(-1)
 
     O, _ = prepare_centered_oks(vstate._apply_fun, vstate.parameters, samples, vstate.model_state, mode, False, chunk_size)
 
