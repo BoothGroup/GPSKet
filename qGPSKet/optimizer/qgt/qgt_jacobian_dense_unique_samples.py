@@ -1,10 +1,24 @@
 import netket as nk
 from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
-from netket.optimizer.qgt.qgt_jacobian_dense_logic import prepare_centered_oks
 from netket.optimizer.qgt.qgt_jacobian_dense import QGTJacobianDenseT
 
-from netket.stats import subtract_mean
+import netket.jax as nkjax
 
+
+from typing import Tuple, Optional, Callable, Any
+from netket.utils.types import PyTree
+
+from netket.stats.mpi_stats import (
+    sum as _sum
+)
+
+from netket.optimizer.qgt.qgt_jacobian_dense_logic import (
+    dense_jacobian_real_holo,
+    dense_jacobian_cplx,
+    tree_to_reim
+)
+
+import jax
 import jax.numpy as jnp
 
 from functools import partial
@@ -32,13 +46,49 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
     except:
         pass
 
-    samples, counts = vstate.samples
-    samples = samples.reshape((-1, samples.shape[-1]))
-    counts = counts.reshape(-1)
-
-    O, _ = prepare_centered_oks(vstate._apply_fun, vstate.parameters, samples, vstate.model_state, mode, False, chunk_size)
-
-    O *= jnp.sqrt(counts.reshape(-1, 1))
-    O = subtract_mean(O, axis=0)
-
+    O = prepare_centered_oks(vstate._apply_fun, vstate.parameters, vstate.samples, vstate.model_state, mode, chunk_size)
     return QGTJacobianDenseT(O=O, mode=mode)
+
+@partial(jax.jit, static_argnames=("apply_fun", "mode", "chunk_size"))
+def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts: Tuple[jnp.ndarray, jnp.ndarray], model_state: Optional[PyTree], mode: str, chunk_size: Optional[int]=None) -> PyTree:
+    samples = samples_and_counts[0]
+    counts = samples_and_counts[1]
+
+    norm = _sum(counts)
+
+    def forward_fn(w, samps):
+        return apply_fun({"params": w, **model_state}, samps)
+
+    if mode == "real":
+        split_complex_params = True
+        jacobian_fun = dense_jacobian_real_holo
+    elif mode =="complex":
+        split_complex_params = True
+        jacobian_fun = dense_jacobian_cplx
+    elif mode == "holomorphic":
+        split_complex_params = False
+        jacobian_fun = dense_jacobian_real_holo
+    else:
+        assert(False)
+
+    if split_complex_params:
+        params, reassemble = tree_to_reim(params)
+
+        def f(w, samps):
+            return foward_fn(reassemble(w), samps)
+    else:
+        f = forward_fn
+
+    def gradf_fun(params, samps):
+        return jacobian_fun(f, params, samps)
+
+    jacobians = nkjax.vmap_chunked(gradf_fun, in_axes=(None, 0), chunk_size=chunk_size)(params, samples)
+
+    reshaped_counts = counts.reshape((-1, 1))
+
+    jacobians_mean = _sum(reshaped_counts * jacobians, axis=0, keepdims=True)/norm
+
+    centered_oks =  jnp.sqrt(reshaped_counts) * (jacobians - jacobians_mean) / jnp.sqrt(norm)
+
+    return centered_oks
+
