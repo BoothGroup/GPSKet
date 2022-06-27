@@ -47,7 +47,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
         pass
 
     O = prepare_centered_oks(vstate._apply_fun, vstate.parameters, vstate.samples, vstate.model_state, mode, chunk_size)
-    return QGTJacobianDenseT(O=O, mode=mode)
+    return QGTJacobianDenseT(O=O, mode=mode, **kwargs)
 
 @partial(jax.jit, static_argnames=("apply_fun", "mode", "chunk_size"))
 def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts: Tuple[jnp.ndarray, jnp.ndarray], model_state: Optional[PyTree], mode: str, chunk_size: Optional[int]=None) -> PyTree:
