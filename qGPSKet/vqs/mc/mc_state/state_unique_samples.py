@@ -19,7 +19,6 @@ from netket.utils.mpi import (
 from netket.stats import Stats
 
 from netket.stats.mpi_stats import (
-    mean as _mean,
     sum as _sum
 )
 
@@ -133,13 +132,13 @@ def grad_expect_hermitian_chunked(chunk_size: int, estimator_fun: Callable, mode
     samples = samples_and_counts[0]
     counts = samples_and_counts[1]
 
-    n_samples = _sum(counts)
+    norm = _sum(counts)
 
     loc_vals = estimator_fun(model_apply_fun, {"params": parameters, **model_state}, samples, estimator_args, chunk_size=chunk_size)
 
-    mean = _mean(counts * loc_vals)
+    mean = _sum(counts * loc_vals)/norm
 
-    variance = _sum(counts * (jnp.abs(loc_vals - mean)**2))/n_samples
+    variance = _sum(counts * (jnp.abs(loc_vals - mean)**2))/norm
 
     loc_val_stats = Stats(mean=mean, variance=variance)
 
@@ -151,7 +150,7 @@ def grad_expect_hermitian_chunked(chunk_size: int, estimator_fun: Callable, mode
         else:
             vjp_fun = nkjax.vjp(lambda w, samps: model_apply_fun({"params": w, **model_state}, samps), parameters, samples, conjugate=True)[1]
 
-        val_grad = vjp_fun((jnp.conjugate(loc_vals_centered) / n_samples))[0]
+        val_grad = vjp_fun((jnp.conjugate(loc_vals_centered) / norm))[0]
 
         val_grad = jax.tree_map(lambda x, target: (x if jnp.iscomplexobj(target) else 2 * x.real).astype(target.dtype), val_grad, parameters)
 
