@@ -75,7 +75,7 @@ def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts
         params, reassemble = tree_to_reim(params)
 
         def f(w, samps):
-            return foward_fn(reassemble(w), samps)
+            return forward_fn(reassemble(w), samps)
     else:
         f = forward_fn
 
