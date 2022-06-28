@@ -37,9 +37,10 @@ of expectation values can be trusted and sampler properties and variances are pr
 approach is just hacked into the code with the least possible overhead.
 """
 class MCStateUniqeSamples(nk.vqs.MCState):
-    def __init__(self, *args, max_sampling_steps=None, **kwargs):
+    def __init__(self, *args, max_sampling_steps=None, fill_with_random=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_sampling_steps = max_sampling_steps
+        self.fill_with_random = fill_with_random
 
     def reset(self):
         self._samples = None
@@ -47,7 +48,11 @@ class MCStateUniqeSamples(nk.vqs.MCState):
         self._relative_counts = None
 
     @property
-    def samples(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def samples(self) -> jnp.ndarray:
+        return self.samples_with_counts[0]
+
+    @property
+    def samples_with_counts(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
         if self._unique_samples is None:
             """
             We constructs and synchronize arrays of all samples,
@@ -93,6 +98,17 @@ class MCStateUniqeSamples(nk.vqs.MCState):
                     if self.max_sampling_steps <= count:
                         continue_sampling = False
 
+            if self.fill_with_random:
+                key = jax.random.split(self.sampler_state.rng, num=1)[0]
+                while len(unique_samps) < self.n_samples:
+                    samps = self.sampler.hilbert.random_state(key, size=(self.n_samples - len(unique_samps)), dtype=samps.dtype)
+
+                    for samp in np.array(samps):
+                        unique_samps[tuple(np.array(samp))] += 1
+                        if len(unique_samps) >= self.n_samples:
+                            break
+                    key = jax.random.split(key, num=1)[0]
+
             unique_samples = all_samples
             relative_counts = np.zeros(all_samples.shape[0])
             np.copyto(unique_samples[:len(unique_samps), :], np.array(list(unique_samps.keys()), dtype=samps.dtype))
@@ -100,7 +116,11 @@ class MCStateUniqeSamples(nk.vqs.MCState):
 
             # Split samples and counts across mpi processes
             self._unique_samples = jnp.array(all_samples[start_id:end_id, :])
-            self._relative_counts = jnp.array(relative_counts[start_id:end_id])
+
+            if self.fill_with_random:
+                self._relative_counts = jnp.exp(2*self.log_value(self._unique_samples).real)
+            else:
+                self._relative_counts = jnp.array(relative_counts[start_id:end_id])
 
         return (self._unique_samples, self._relative_counts)
 
@@ -109,7 +129,7 @@ class MCStateUniqeSamples(nk.vqs.MCState):
 @nk.vqs.expect_and_grad.dispatch(precedence=10)
 def expect_and_grad(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, use_covariance: TrueT, chunk_size: Optional[int], *, mutable:Any):
     _, args = get_local_kernel_arguments(vstate, op)
-    samples_and_counts = vstate.samples
+    samples_and_counts = vstate.samples_with_counts
     local_estimator = get_local_kernel(vstate, op, chunk_size)
     assert(mutable is False)
 
@@ -120,7 +140,7 @@ def expect_and_grad(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperato
 @nk.vqs.expect.dispatch(precedence=10)
 def expect(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, chunk_size: Optional[int]):
     _, args = get_local_kernel_arguments(vstate, op)
-    samples_and_counts = vstate.samples
+    samples_and_counts = vstate.samples_with_counts
     local_estimator = get_local_kernel(vstate, op, chunk_size)
 
     exp = grad_expect_hermitian_chunked(chunk_size, local_estimator, vstate._apply_fun, vstate.parameters, vstate.model_state, samples_and_counts, args, compute_grad=False)

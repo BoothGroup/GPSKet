@@ -46,7 +46,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
     except:
         pass
 
-    O = prepare_centered_oks(vstate._apply_fun, vstate.parameters, vstate.samples, vstate.model_state, mode, chunk_size)
+    O = prepare_centered_oks(vstate._apply_fun, vstate.parameters, vstate.samples_with_counts, vstate.model_state, mode, chunk_size)
     return QGTJacobianDenseT(O=O, mode=mode, **kwargs)
 
 @partial(jax.jit, static_argnames=("apply_fun", "mode", "chunk_size"))
