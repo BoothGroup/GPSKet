@@ -130,7 +130,10 @@ class MCStateUniqeSamples(nk.vqs.MCState):
 def expect_and_grad(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, use_covariance: TrueT, chunk_size: Optional[int], *, mutable:Any):
     _, args = get_local_kernel_arguments(vstate, op)
     samples_and_counts = vstate.samples_with_counts
-    local_estimator = get_local_kernel(vstate, op, chunk_size)
+    if chunk_size is not None:
+        local_estimator = get_local_kernel(vstate, op, chunk_size)
+    else:
+        local_estimator = get_local_kernel(vstate, op)
     assert(mutable is False)
 
     exp, grad = grad_expect_hermitian_chunked(chunk_size, local_estimator, vstate._apply_fun, vstate.parameters, vstate.model_state, samples_and_counts, args, compute_grad=True)
@@ -141,7 +144,10 @@ def expect_and_grad(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperato
 def expect(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, chunk_size: Optional[int]):
     _, args = get_local_kernel_arguments(vstate, op)
     samples_and_counts = vstate.samples_with_counts
-    local_estimator = get_local_kernel(vstate, op, chunk_size)
+    if chunk_size is not None:
+        local_estimator = get_local_kernel(vstate, op, chunk_size)
+    else:
+        local_estimator = get_local_kernel(vstate, op)
 
     exp = grad_expect_hermitian_chunked(chunk_size, local_estimator, vstate._apply_fun, vstate.parameters, vstate.model_state, samples_and_counts, args, compute_grad=False)
 
