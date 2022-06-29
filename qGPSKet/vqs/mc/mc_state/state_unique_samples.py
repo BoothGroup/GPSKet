@@ -13,7 +13,8 @@ from netket.utils.mpi import (
     node_number as _rank,
     mpi_sum as _mpi_sum,
     n_nodes as _n_nodes,
-    mpi_sum_jax as _mpi_sum_jax
+    mpi_sum_jax as _mpi_sum_jax,
+    mpi_max_jax as _mpi_max_jax
 )
 
 from netket.stats import Stats
@@ -65,13 +66,16 @@ class MCStateUniqeSamples(nk.vqs.MCState):
             end_id = start_id + self.n_samples_per_rank
 
             unique_samps = defaultdict(lambda: 0)
-            continue_sampling = True
             count = 0
-            while(len(unique_samps) < self.n_samples and continue_sampling):
-                if count == 0:
-                    samps = self.sample()
-                else:
-                    samps = self.sample(n_discard_per_chain=0)
+            continue_sampling = True
+
+            if self.max_sampling_steps is not None:
+                if self.max_sampling_steps <= count:
+                    continue_sampling = False
+
+
+            samps = self.sample()
+            while(continue_sampling):
                 samps_np = np.asarray(samps.reshape((-1, samps.shape[-1])))
 
                 """
@@ -97,30 +101,35 @@ class MCStateUniqeSamples(nk.vqs.MCState):
                 if self.max_sampling_steps is not None:
                     if self.max_sampling_steps <= count:
                         continue_sampling = False
+                elif len(unique_samps) >= self.n_samples:
+                    continue_sampling = False
+                else:
+                    samps = self.sample(n_discard_per_chain=0)
+
+            unique_samples = np.zeros((self.n_samples, samps.shape[-1]), dtype=np.array(samps).dtype)
+            relative_counts = np.zeros(unique_samples.shape[0])
+
+            if len(unique_samps) > 0:
+                np.copyto(unique_samples, all_samples)
+                np.copyto(unique_samples[:len(unique_samps), :], np.array(list(unique_samps.keys()), dtype=np.array(samps).dtype))
+                np.copyto(relative_counts[:len(unique_samps)], np.array(list(unique_samps.values()), dtype=float))
+            else:
+                assert(self.fill_with_random)
 
             if self.fill_with_random:
-                key = jax.random.split(self.sampler_state.rng, num=1)[0]
-                while len(unique_samps) < self.n_samples:
-                    samps = self.sampler.hilbert.random_state(key, size=(self.n_samples - len(unique_samps)), dtype=samps.dtype)
-
-                    for samp in np.array(samps):
-                        unique_samps[tuple(np.array(samp))] += 1
-                        if len(unique_samps) >= self.n_samples:
-                            break
-                    key = jax.random.split(key, num=1)[0]
-
-            unique_samples = all_samples
-            relative_counts = np.zeros(all_samples.shape[0])
-            np.copyto(unique_samples[:len(unique_samps), :], np.array(list(unique_samps.keys()), dtype=samps.dtype))
-            np.copyto(relative_counts[:len(unique_samps)], np.array(list(unique_samps.values()), dtype=float))
+                synced_key = _mpi_sum_jax(self.sampler_state.rng)[0]
+                added_samples = self.sampler.hilbert.random_state(synced_key, size=(self.n_samples - len(unique_samps)), dtype=samps.dtype)
+                np.copyto(unique_samples[len(unique_samps):, :], np.array(added_samples))
+                log_probs = 2*self.log_value(added_samples).real
+                log_probs = log_probs-_mpi_max_jax(jnp.max(log_probs))[0]
+                probs_added = jnp.exp(log_probs)
+                if len(unique_samps) > 0:
+                    probs_added *= jnp.sum(relative_counts[:len(unique_samps)])/jnp.sum(probs_added) # 50:50 split
+                np.copyto(relative_counts[len(unique_samps):], np.array(probs_added))
 
             # Split samples and counts across mpi processes
-            self._unique_samples = jnp.array(all_samples[start_id:end_id, :])
-
-            if self.fill_with_random:
-                self._relative_counts = jnp.exp(2*self.log_value(self._unique_samples).real)
-            else:
-                self._relative_counts = jnp.array(relative_counts[start_id:end_id])
+            self._unique_samples = jnp.array(unique_samples[start_id:end_id, :])
+            self._relative_counts = jnp.array(relative_counts[start_id:end_id])
 
         return (self._unique_samples, self._relative_counts)
 
@@ -154,13 +163,16 @@ def expect(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, chunk_
     return exp
 
 @partial(jax.jit, static_argnums=(0,1,2,7))
-def grad_expect_hermitian_chunked(chunk_size: int, estimator_fun: Callable, model_apply_fun: Callable, parameters: PyTree, model_state: PyTree, samples_and_counts: Tuple[jnp.ndarray, jnp.ndarray], estimator_args: PyTree, compute_grad=False):
+def grad_expect_hermitian_chunked(chunk_size: Optional[int], estimator_fun: Callable, model_apply_fun: Callable, parameters: PyTree, model_state: PyTree, samples_and_counts: Tuple[jnp.ndarray, jnp.ndarray], estimator_args: PyTree, compute_grad=False):
     samples = samples_and_counts[0]
     counts = samples_and_counts[1]
 
     norm = _sum(counts)
 
-    loc_vals = estimator_fun(model_apply_fun, {"params": parameters, **model_state}, samples, estimator_args, chunk_size=chunk_size)
+    if chunk_size is not None:
+        loc_vals = estimator_fun(model_apply_fun, {"params": parameters, **model_state}, samples, estimator_args, chunk_size=chunk_size)
+    else:
+        loc_vals = estimator_fun(model_apply_fun, {"params": parameters, **model_state}, samples, estimator_args)
 
     mean = _sum(counts * loc_vals)/norm
 
