@@ -8,6 +8,7 @@ from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from jax.nn.initializers import zeros, ones
 from qGPSKet.nn.initializers import normal
+from qGPSKet.models import qGPS
 
 
 class AbstractARqGPS(nn.Module):
@@ -155,6 +156,25 @@ class ARqGPS(AbstractARqGPS):
             log_psi_symm_im = logsumexp(1j*log_psi.imag, axis=-1).imag
             log_psi_symm = log_psi_symm+1j*log_psi_symm_im
         return log_psi_symm # (B,)
+
+class ARqGPSModPhase(ARqGPS):
+    """
+    Implements an Ansatz composed of an autoregressive qGPS for the modulus of the amplitude and a qGPS for the phase.
+    """
+    
+    def setup(self):
+        assert jnp.issubdtype(self.dtype, jnp.floating)
+        super().setup()
+        self._qgps = qGPS(
+            self.hilbert, self.hilbert.size,
+            dtype=jnp.float64,
+            init_fun=self.init_fun,
+            to_indices=self.to_indices)
+
+    def __call__(self, inputs: Array) -> Array:
+        log_psi_mod = super().__call__(inputs)
+        log_psi_phase = self._qgps(inputs)
+        return log_psi_mod + log_psi_phase*1j
 
 
 def _normalize(log_psi: Array, machine_pow: int) -> Array:
