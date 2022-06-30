@@ -86,7 +86,7 @@ class ARqGPS(AbstractARqGPS):
     """Type of the variational parameters"""
     machine_pow: int = 2
     """Exponent required to normalize the output"""
-    init_fun: NNInitFunc = normal()
+    init_fun: NNInitFunc = normal(sigma=0.01)
     """Initializer for the variational parameters"""
     to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
     """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
@@ -250,9 +250,6 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
     return log_psi # (B, D)
 
 def _conditionals(model: ARqGPS, inputs: Array) -> Array:
-    # Convert input configurations into indices
-    batch_size = inputs.shape[0]
-
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(carry, index):
         cache, n_spins = carry
@@ -265,6 +262,7 @@ def _conditionals(model: ARqGPS, inputs: Array) -> Array:
         )
         return (cache, n_spins), log_psi
 
+    batch_size = inputs.shape[0]
     cache = jnp.ones((batch_size, model.hilbert.local_size, model.M), model.dtype)
     n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
     indices = jnp.arange(model.hilbert.size)
