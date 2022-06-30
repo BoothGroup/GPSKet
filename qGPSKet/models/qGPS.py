@@ -116,8 +116,13 @@ class qGPS(nn.Module):
 
         epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.M, self.L), self.dtype)
 
+        # Register the cache variables
+        if update_sites is not None or cache_intermediates:
+            saved_configs = self.variable("intermediates_cache", "samples", lambda : None)
+            saved_site_product = self.variable("intermediates_cache", "site_prod", lambda : None)
+
         if update_sites is not None:
-            indices_save = self.variable("intermediates_cache", "samples", lambda : None).value
+            indices_save = saved_configs.value
             old_samples = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(indices_save, update_sites)
 
             def inner_site_product_update(site_prod_old, new_occs, old_occs, sites):
@@ -130,7 +135,7 @@ class qGPS(nn.Module):
                 inv_sym_old, inv_sym_sites = self.symmetries_inverse(sample_old, update_sites)
                 return jax.vmap(inner_site_product_update, in_axes=(-1, -1, -1, -1), out_axes=-1)(site_prod_old, inv_sym_new, inv_sym_old, inv_sym_sites)
 
-            site_product_old = self.variable("intermediates_cache", "site_prod", lambda : None).value
+            site_product_old = saved_site_product.value
             site_product = jax.vmap(outer_site_product_update, in_axes=(0, 0, 0, 0), out_axes=0)(site_product_old, indices, old_samples, update_sites)
         else:
             def evaluate_site_product(sample):
@@ -144,18 +149,16 @@ class qGPS(nn.Module):
             site_product = jax.vmap(get_site_prod)(transformed_samples)
 
         if cache_intermediates:
-            self.variable("intermediates_cache", "site_prod", lambda : None).value = site_product
-
-            indices_save = self.variable("intermediates_cache", "samples", lambda : None)
+            saved_site_product.value = site_product
             if update_sites is not None:
                 def update_fun(saved_config, update_sites, occs):
                     def scan_fun(carry, count):
                         return (carry.at[update_sites[count]].set(occs[count]), None)
                     return jax.lax.scan(scan_fun, saved_config, jnp.arange(update_sites.shape[0]), reverse=True)[0]
-                full_samples = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(indices_save.value, update_sites, indices)
+                full_samples = jax.vmap(update_fun, in_axes=(0, 0, 0), out_axes=0)(saved_configs.value, update_sites, indices)
             else:
                 full_samples = indices
 
-            indices_save.value = full_samples
+            saved_configs.value = full_samples
 
         return self.out_transformation(site_product)
