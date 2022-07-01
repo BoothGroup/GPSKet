@@ -11,6 +11,11 @@ from qGPSKet.nn.initializers import normal
 from qGPSKet.models import qGPS
 
 
+def gpu_cond(pred, true_func, false_func, args):
+    return jax.tree_map(
+        lambda x, y: pred * x + (1 - pred) * y, true_func(args), false_func(args)
+    )
+
 class AbstractARqGPS(nn.Module):
     """
     Base class for autoregressive qGPS.
@@ -192,7 +197,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     prods = jnp.asarray(prods, epsilon.dtype) # (B, D, M)
 
     # Update cache if index is positive, otherwise leave as is
-    cache = jax.lax.cond(
+    cache = gpu_cond(
         index >= 0,
         lambda _: prods,
         lambda _: cache,
@@ -203,7 +208,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     log_psi = jnp.sum(prods, axis=-1) # (B, D)
 
     # Update spins count if index is larger than 0, otherwise leave as is
-    n_spins = jax.lax.cond(
+    n_spins = gpu_cond(
         index > 0,
         lambda n_spins: n_spins + count_spins(inputs_i),
         lambda n_spins: n_spins,
@@ -215,7 +220,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf
-    log_psi = jax.lax.cond(
+    log_psi = gpu_cond(
         index >= 0,
         lambda log_psi: log_psi+renormalize_log_psi(n_spins, hilbert, index),
         lambda log_psi: log_psi,
@@ -254,7 +259,7 @@ def _conditionals(model: ARqGPS, inputs: Array) -> Array:
     def _scan_fun(carry, index):
         cache, n_spins = carry
         (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
-        n_spins = jax.lax.cond(
+        n_spins = gpu_cond(
             model.hilbert.constrained,
             lambda n_spins: n_spins,
             lambda n_spins: jnp.zeros_like(n_spins),
