@@ -7,7 +7,7 @@ from flax import linen as nn
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from qGPSKet.nn.initializers import normal
 from jax.nn.initializers import zeros
-from .autoreg_qGPS import _normalize, AbstractARqGPS
+from .autoreg_qGPS import _normalize, gpu_cond, AbstractARqGPS
 
 
 class ARqGPSFull(AbstractARqGPS):
@@ -117,7 +117,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: A
     log_psi = jnp.sum(site_prod, axis=-1) # (B, D)
 
     # Update spins count if index is larger than 0, otherwise leave as is
-    n_spins = jax.lax.cond(
+    n_spins = gpu_cond(
         index > 0,
         lambda n_spins: n_spins + count_spins(inputs_i),
         lambda n_spins: n_spins,
@@ -129,7 +129,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: A
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf
-    log_psi = jax.lax.cond(
+    log_psi = gpu_cond(
         index >= 0,
         lambda log_psi: log_psi+renormalize_log_psi(n_spins, hilbert, index),
         lambda log_psi: log_psi,
@@ -160,7 +160,7 @@ def _conditionals(model: ARqGPSFull, inputs: Array) -> Array:
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(n_spins, index):
         n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
-        n_spins = jax.lax.cond(
+        n_spins = gpu_cond(
             model.hilbert.constrained,
             lambda n_spins: n_spins,
             lambda n_spins: jnp.zeros_like(n_spins),

@@ -8,7 +8,13 @@ from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from jax.nn.initializers import zeros, ones
 from qGPSKet.nn.initializers import normal
+from qGPSKet.models import qGPS
 
+
+def gpu_cond(pred, true_func, false_func, args):
+    return jax.tree_map(
+        lambda x, y: pred * x + (1 - pred) * y, true_func(args), false_func(args)
+    )
 
 class AbstractARqGPS(nn.Module):
     """
@@ -85,7 +91,7 @@ class ARqGPS(AbstractARqGPS):
     """Type of the variational parameters"""
     machine_pow: int = 2
     """Exponent required to normalize the output"""
-    init_fun: NNInitFunc = normal()
+    init_fun: NNInitFunc = normal(sigma=0.01)
     """Initializer for the variational parameters"""
     to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
     """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
@@ -156,6 +162,25 @@ class ARqGPS(AbstractARqGPS):
             log_psi_symm = log_psi_symm+1j*log_psi_symm_im
         return log_psi_symm # (B,)
 
+class ARqGPSModPhase(ARqGPS):
+    """
+    Implements an Ansatz composed of an autoregressive qGPS for the modulus of the amplitude and a qGPS for the phase.
+    """
+    
+    def setup(self):
+        assert jnp.issubdtype(self.dtype, jnp.floating)
+        super().setup()
+        self._qgps = qGPS(
+            self.hilbert, self.hilbert.size,
+            dtype=jnp.float64,
+            init_fun=self.init_fun,
+            to_indices=self.to_indices)
+
+    def __call__(self, inputs: Array) -> Array:
+        log_psi_mod = super().__call__(inputs)
+        log_psi_phase = self._qgps(inputs)
+        return log_psi_mod + log_psi_phase*1j
+
 
 def _normalize(log_psi: Array, machine_pow: int) -> Array:
     return log_psi - (1/machine_pow)*logsumexp(machine_pow*log_psi.real, axis=-1, keepdims=True)
@@ -172,7 +197,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     prods = jnp.asarray(prods, epsilon.dtype) # (B, D, M)
 
     # Update cache if index is positive, otherwise leave as is
-    cache = jax.lax.cond(
+    cache = gpu_cond(
         index >= 0,
         lambda _: prods,
         lambda _: cache,
@@ -183,7 +208,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     log_psi = jnp.sum(prods, axis=-1) # (B, D)
 
     # Update spins count if index is larger than 0, otherwise leave as is
-    n_spins = jax.lax.cond(
+    n_spins = gpu_cond(
         index > 0,
         lambda n_spins: n_spins + count_spins(inputs_i),
         lambda n_spins: n_spins,
@@ -195,7 +220,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf
-    log_psi = jax.lax.cond(
+    log_psi = gpu_cond(
         index >= 0,
         lambda log_psi: log_psi+renormalize_log_psi(n_spins, hilbert, index),
         lambda log_psi: log_psi,
@@ -230,14 +255,11 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
     return log_psi # (B, D)
 
 def _conditionals(model: ARqGPS, inputs: Array) -> Array:
-    # Convert input configurations into indices
-    batch_size = inputs.shape[0]
-
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(carry, index):
         cache, n_spins = carry
         (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
-        n_spins = jax.lax.cond(
+        n_spins = gpu_cond(
             model.hilbert.constrained,
             lambda n_spins: n_spins,
             lambda n_spins: jnp.zeros_like(n_spins),
@@ -245,6 +267,7 @@ def _conditionals(model: ARqGPS, inputs: Array) -> Array:
         )
         return (cache, n_spins), log_psi
 
+    batch_size = inputs.shape[0]
     cache = jnp.ones((batch_size, model.hilbert.local_size, model.M), model.dtype)
     n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
     indices = jnp.arange(model.hilbert.size)
