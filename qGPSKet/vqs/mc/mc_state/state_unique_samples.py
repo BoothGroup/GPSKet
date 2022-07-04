@@ -101,9 +101,9 @@ class MCStateUniqeSamples(nk.vqs.MCState):
                 if self.max_sampling_steps is not None:
                     if self.max_sampling_steps <= count:
                         continue_sampling = False
-                elif len(unique_samps) >= self.n_samples:
+                if len(unique_samps) >= self.n_samples:
                     continue_sampling = False
-                else:
+                if continue_sampling:
                     samps = self.sample(n_discard_per_chain=0)
 
             unique_samples = np.zeros((self.n_samples, samps.shape[-1]), dtype=np.array(samps).dtype)
