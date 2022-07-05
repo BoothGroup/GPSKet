@@ -131,6 +131,8 @@ class MCStateUniqeSamples(nk.vqs.MCState):
             self._unique_samples = jnp.array(unique_samples[start_id:end_id, :])
             self._relative_counts = jnp.array(relative_counts[start_id:end_id])
 
+            self._relative_counts /= _sum(self._relative_counts)
+
         return (self._unique_samples, self._relative_counts)
 
 
@@ -167,16 +169,14 @@ def grad_expect_hermitian_chunked(chunk_size: Optional[int], estimator_fun: Call
     samples = samples_and_counts[0]
     counts = samples_and_counts[1]
 
-    norm = _sum(counts)
-
     if chunk_size is not None:
         loc_vals = estimator_fun(model_apply_fun, {"params": parameters, **model_state}, samples, estimator_args, chunk_size=chunk_size)
     else:
         loc_vals = estimator_fun(model_apply_fun, {"params": parameters, **model_state}, samples, estimator_args)
 
-    mean = _sum(counts * loc_vals)/norm
+    mean = _sum(counts * loc_vals)
 
-    variance = _sum(counts * (jnp.abs(loc_vals - mean)**2))/norm
+    variance = _sum(counts * (jnp.abs(loc_vals - mean)**2))
 
     loc_val_stats = Stats(mean=mean, variance=variance)
 
@@ -188,7 +188,7 @@ def grad_expect_hermitian_chunked(chunk_size: Optional[int], estimator_fun: Call
         else:
             vjp_fun = nkjax.vjp(lambda w, samps: model_apply_fun({"params": w, **model_state}, samps), parameters, samples, conjugate=True)[1]
 
-        val_grad = vjp_fun((jnp.conjugate(loc_vals_centered) / norm))[0]
+        val_grad = vjp_fun((jnp.conjugate(loc_vals_centered)))[0]
 
         val_grad = jax.tree_map(lambda x, target: (x if jnp.iscomplexobj(target) else 2 * x.real).astype(target.dtype), val_grad, parameters)
 
