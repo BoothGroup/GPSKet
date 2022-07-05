@@ -26,7 +26,7 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
     def __init__(self, deterministic_samples, N_total, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        assert(self.sampler.n_chains == 1)
+        assert(self.sampler.n_chains_per_rank == 1)
 
         self.n_sweeps = self.sampler.n_sweeps
 
