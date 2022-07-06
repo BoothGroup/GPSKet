@@ -54,8 +54,6 @@ def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts
     samples = samples_and_counts[0]
     counts = samples_and_counts[1]
 
-    norm = _sum(counts)
-
     def forward_fn(w, samps):
         return apply_fun({"params": w, **model_state}, samps)
 
@@ -86,9 +84,9 @@ def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts
 
     reshaped_counts = counts.reshape((-1, 1))
 
-    jacobians_mean = _sum(reshaped_counts * jacobians, axis=0, keepdims=True)/norm
+    jacobians_mean = _sum(reshaped_counts * jacobians, axis=0, keepdims=True)
 
-    centered_oks =  jnp.sqrt(reshaped_counts) * (jacobians - jacobians_mean) / jnp.sqrt(norm)
+    centered_oks =  jnp.sqrt(reshaped_counts) * (jacobians - jacobians_mean)
 
     return centered_oks
 

@@ -255,17 +255,17 @@ class QGPSLearning():
             errors *= weightings
         return _MPI_comm.allreduce(np.sum(errors))
 
-    def update_epsilon_with_weights(self):
-        old_weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+    def update_epsilon_with_weights(self, prior_mean=0.):
+        old_weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()-prior_mean
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            old_weights = np.concatenate((old_weights.imag, old_weights.real))
+            old_weights = np.concatenate((old_weights.imag, old_weights.real))-prior_mean
 
         weights = np.where(self.valid_kern, self.weights, old_weights)
-        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:self.epsilon.shape[0]*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
+        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:self.epsilon.shape[0]*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, self.support_dim_range_ids, self.ref_sites] += 1.j * weights[self.epsilon.shape[0]*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
+            self.epsilon[:, self.support_dim_range_ids, self.ref_sites] += 1.j * weights[self.epsilon.shape[0]*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
 
 
 class QGPSLearningExp(QGPSLearning):
@@ -298,7 +298,7 @@ class QGPSLearningExp(QGPSLearning):
 
         self.setup_fit_alpha_dep()
 
-    def setup_fit(self, confset, target_amplitudes, ref_sites, weightings=None):
+    def setup_fit(self, confset, target_amplitudes, ref_sites, weightings=None, prior_mean=0.):
         self.ref_sites = ref_sites
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
         if self.epsilon.dtype == float:
@@ -306,6 +306,7 @@ class QGPSLearningExp(QGPSLearning):
         else:
             self.fit_data = np.log(self.exp_amps)
         self.set_kernel_mat(confset)
+        self.fit_data -= prior_mean * _mpi_sum(np.sum(self.K, axis=1))
         self.setup_fit_noise_dep(weightings=weightings)
 
     def log_marg_lik(self):
@@ -430,8 +431,8 @@ class QGPSLearningExp(QGPSLearning):
 
     def fit_step(self, confset, target_amplitudes, ref_sites, noise_bounds=[(None, None)],
                  opt_alpha=True, opt_noise=True, max_alpha_iterations=None, max_noise_iterations=None, rvm=False,
-                 weightings=None):
-        self.setup_fit(confset, target_amplitudes, ref_sites, weightings=weightings)
+                 weightings=None, prior_mean=0.):
+        self.setup_fit(confset, target_amplitudes, ref_sites, weightings=weightings, prior_mean=prior_mean)
         if opt_noise:
             alpha_init = self.alpha_mat_ref_sites.copy()
             def ML(x):
@@ -472,7 +473,7 @@ class QGPSLearningExp(QGPSLearning):
         if opt_alpha:
             self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
 
-        self.update_epsilon_with_weights()
+        self.update_epsilon_with_weights(prior_mean=prior_mean)
         return
 
     '''
@@ -579,8 +580,8 @@ class QGPSLearningExp(QGPSLearning):
         return
 
 
-    def fit_step_growing_RVM(self, confset, target_amplitudes, ref_site,alpha_iterations=None, multiplication=None, weightings=None):
-        self.setup_fit(confset, target_amplitudes, ref_site, multiplication=multiplication, weightings=weightings)
+    def fit_step_growing_RVM(self, confset, target_amplitudes, ref_site,alpha_iterations=None, multiplication=None, weightings=None, prior_mean=0.):
+        self.setup_fit(confset, target_amplitudes, ref_site, multiplication=multiplication, weightings=weightings, prior_mean=prior_mean)
 
         if np.max(self.active_elements) == 0:
             if np.min(abs(np.diag(self.KtK))) < np.finfo(np.float32).eps:
