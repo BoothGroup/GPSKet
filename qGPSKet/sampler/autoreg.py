@@ -1,4 +1,5 @@
 import jax
+import numpy as np
 from jax import numpy as jnp
 from functools import partial
 from netket.sampler import Sampler, SamplerState
@@ -47,7 +48,12 @@ class ARDirectSampler(Sampler):
     def _init_cache(sampler, model, σ, key):
         # FIXME: hacky solution to make sure cache of FastARQGPS._conditional
         # is not updated during init
-        variables = model.init(key, σ, -1, method=model._conditional)
+        if hasattr(model, 'plaquettes'):
+            L = sampler.hilbert.size
+            scan_init = (-1, np.zeros(L), np.arange(L))
+        else:
+            scan_init = -1
+        variables = model.init(key, σ, scan_init, method=model._conditional)
         if "cache" in variables:
             cache = variables["cache"]
         else:
@@ -75,7 +81,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
     if "cache" in variables:
         variables, _ = variables.pop("cache")
 
-    def scan_fun(carry, index):
+    def scan_fun(carry, args):
         σ, cache, key = carry
         if cache:
             _variables = {**variables, "cache": cache}
@@ -86,7 +92,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         p, mutables = model.apply(
             _variables,
             σ,
-            index,
+            args,
             method=model._conditional,
             mutable=["cache"]
         )
@@ -97,6 +103,10 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         
         local_states = jnp.asarray(sampler.hilbert.local_states, dtype=sampler.dtype)
         new_σ = batch_choice(key, local_states, p)
+        if hasattr(model, 'plaquettes'):
+            index = args[0]
+        else:
+            index = args
         σ = σ.at[:, index].set(new_σ)
 
         return (σ, cache, new_key), None
@@ -116,10 +126,16 @@ def _sample_chain(sampler, model, variables, state, chain_length):
     cache = sampler._init_cache(model, σ, key_init)
 
     indices = jnp.arange(sampler.hilbert.size)
+    if hasattr(model, 'plaquettes'):
+        masks = np.asarray(model.masks, np.int32)
+        plaquettes = np.asarray(model.plaquettes, np.int32)
+        scan_init = (indices, masks, plaquettes)
+    else:
+        scan_init = indices
     (σ, _, _), _ = jax.lax.scan(
         scan_fun,
         (σ, cache, key_scan),
-        indices,
+        scan_init,
     )
 
     # Apply symmetries
