@@ -9,6 +9,8 @@ from netket.stats.mpi_stats import (
     sum as _sum
 )
 
+import netket.jax as nkjax
+
 from netket.utils.mpi import (
     node_number as _rank,
     mpi_max_jax as _mpi_max_jax,
@@ -114,7 +116,12 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
 
                 random_samps = jnp.array(np.array(random_samples))
 
-                norm_sampled = self.N_complement * _sum(jnp.exp(2 * self.log_value(random_samps).real - rescale_shift))/_sum(random_samps.shape[0])
+                def log_prob(samp):
+                    return 2 * self.log_value(samp.reshape((1,-1))).real
+
+                log_probs_sampled = nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(random_samps)
+
+                norm_sampled = self.N_complement * _sum(jnp.exp(log_probs_sampled - rescale_shift))/_sum(random_samps.shape[0])
 
             else:
                 # Approximation to the norm correction from the sampled set (evaluated with self-normalizing importance sampling)
