@@ -90,8 +90,11 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
 
             all_samples = jnp.concatenate((self.deterministic_samples, samples_from_complement))
 
-            log_prob_amps_deterministic =  2 * self.log_value(self.deterministic_samples).real
-            log_prob_amps_complement =  2 * self.log_value(samples_from_complement).real
+            def log_prob(samp):
+                return 2 * self.log_value(samp.reshape((1,-1))).real
+
+            log_prob_amps_deterministic =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(self.deterministic_samples)
+            log_prob_amps_complement =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(samples_from_complement)
 
             # Renormalise the probability amplitudes for numerical stability
             rescale_shift = _mpi_max_jax(jnp.max(jnp.concatenate((log_prob_amps_deterministic, log_prob_amps_complement))))[0]
@@ -104,20 +107,19 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
             if self.rand_norm:
                 # Approximation to the norm correction from a uniformly sampled set
                 key = jax.random.split(self.sampler_state.rng)[0]
-                random_samples = []
-                for i in range(self.number_random_samples):
+                random_samples = np.empty((self.number_random_samples, self.deterministic_samples.shape[-1]), dtype=self.deterministic_samples.dtype)
+                found_samples = 0
+                while found_samples < self.number_random_samples:
                     key = jax.random.split(key)[0]
-                    samp = self.sampler.hilbert.random_state(key, dtype=self.deterministic_samples.dtype).reshape(-1)
-                    while(tuple(np.array(samp)) in self.lookup_dict):
-                        key = jax.random.split(key)[0]
-                        samp = self.sampler.hilbert.random_state(key, dtype=self.deterministic_samples.dtype).reshape(-1)
-                    random_samples.append(np.array(samp))
+                    proposed_samples = np.array(self.sampler.hilbert.random_state(key, size=self.number_random_samples, dtype=self.deterministic_samples.dtype))
+                    for samp in proposed_samples:
+                        if tuple(samp) not in self.lookup_dict:
+                            np.copyto(random_samples[found_samples], samp)
+                            found_samples += 1
+                            if found_samples == self.number_random_samples:
+                                break
 
-
-                random_samps = jnp.array(np.array(random_samples))
-
-                def log_prob(samp):
-                    return 2 * self.log_value(samp.reshape((1,-1))).real
+                random_samps = jnp.array(random_samples)
 
                 log_probs_sampled = nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(random_samps)
 
