@@ -37,7 +37,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
     if mode is None:
         mode = choose_jacobian_mode(vstate._apply_fun, vstate.parameters, vstate.model_state, vstate.samples[0], mode=mode, holomorphic=holomorphic)
     else:
-        assert(holomorphic is not None)
+        assert(holomorphic is None)
 
     chunk_size = None
 
