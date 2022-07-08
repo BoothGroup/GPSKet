@@ -91,5 +91,5 @@ def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts
 
     centered_oks =  jnp.sqrt(reshaped_counts) * (jacobians - jacobians_mean)
 
-    return centered_oks
+    return centered_oks.reshape(-1, centered_oks.shape[-1])
 
