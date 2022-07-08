@@ -82,7 +82,10 @@ def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts
 
     jacobians = nkjax.vmap_chunked(gradf_fun, in_axes=(None, 0), chunk_size=chunk_size)(params, samples)
 
-    reshaped_counts = counts.reshape((-1, 1))
+    if split_complex_params:
+        reshaped_counts = counts.reshape((-1, 1, 1))
+    else:
+        reshaped_counts = counts.reshape((-1, 1))
 
     jacobians_mean = _sum(reshaped_counts * jacobians, axis=0, keepdims=True)
 
