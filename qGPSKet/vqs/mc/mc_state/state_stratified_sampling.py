@@ -91,7 +91,7 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
             all_samples = jnp.concatenate((self.deterministic_samples, samples_from_complement))
 
             def log_prob(samp):
-                return 2 * self.log_value(samp.reshape((1,-1))).real
+                return jnp.squeeze(2 * self.log_value(samp.reshape((1,-1))).real)
 
             log_prob_amps_deterministic =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(self.deterministic_samples)
             log_prob_amps_complement =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(samples_from_complement)
