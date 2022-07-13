@@ -25,7 +25,7 @@ from dataclasses import replace
 into a determinisitic evaluation over a fixed set, and a sampled estimate over the complement.
 At the moment this is only an implementation for quick testing which is very slow. """
 class MCStateStratifiedSampling(MCStateUniqeSamples):
-    def __init__(self, deterministic_samples, N_total, *args, rand_norm=True, number_random_samples=None, **kwargs):
+    def __init__(self, deterministic_samples, N_total, *args, rand_norm=True, number_random_samples=None, renormalize=True, **kwargs):
         super().__init__(*args, **kwargs)
 
         assert(self.sampler.n_chains_per_rank == 1)
@@ -57,6 +57,8 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
             self.number_random_samples = self.n_samples_per_rank - self.deterministic_samples.shape[0]
         else:
             self.number_random_samples = len(np.array_split(np.arange(number_random_samples), _n_nodes)[_rank])
+
+        self.renormalize = renormalize
 
 
     def sample_step(self):
@@ -101,35 +103,38 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
             log_prob_amps_deterministic -= rescale_shift
             log_prob_amps_complement -= rescale_shift
 
-            # Contribution of the determinisitc set to the norm
-            norm_deterministic = _sum(jnp.exp(log_prob_amps_deterministic))
+            if self.renormalize:
+                # Contribution of the determinisitc set to the norm
+                norm_deterministic = _sum(jnp.exp(log_prob_amps_deterministic))
 
-            if self.rand_norm:
-                # Approximation to the norm correction from a uniformly sampled set
-                key = jax.random.split(self.sampler_state.rng)[0]
-                random_samples = np.empty((self.number_random_samples, self.deterministic_samples.shape[-1]), dtype=self.deterministic_samples.dtype)
-                found_samples = 0
-                while found_samples < self.number_random_samples:
-                    key = jax.random.split(key)[0]
-                    proposed_samples = np.array(self.sampler.hilbert.random_state(key, size=self.number_random_samples, dtype=self.deterministic_samples.dtype))
-                    for samp in proposed_samples:
-                        if tuple(samp) not in self.lookup_dict:
-                            np.copyto(random_samples[found_samples], samp)
-                            found_samples += 1
-                            if found_samples == self.number_random_samples:
-                                break
+                if self.rand_norm:
+                    # Approximation to the norm correction from a uniformly sampled set
+                    key = jax.random.split(self.sampler_state.rng)[0]
+                    random_samples = np.empty((self.number_random_samples, self.deterministic_samples.shape[-1]), dtype=self.deterministic_samples.dtype)
+                    found_samples = 0
+                    while found_samples < self.number_random_samples:
+                        key = jax.random.split(key)[0]
+                        proposed_samples = np.array(self.sampler.hilbert.random_state(key, size=self.number_random_samples, dtype=self.deterministic_samples.dtype))
+                        for samp in proposed_samples:
+                            if tuple(samp) not in self.lookup_dict:
+                                np.copyto(random_samples[found_samples], samp)
+                                found_samples += 1
+                                if found_samples == self.number_random_samples:
+                                    break
 
-                random_samps = jnp.array(random_samples)
+                    random_samps = jnp.array(random_samples)
 
-                log_probs_sampled = nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(random_samps)
+                    log_probs_sampled = nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(random_samps)
 
-                norm_sampled = self.N_complement * _sum(jnp.exp(log_probs_sampled - rescale_shift))/_sum(random_samps.shape[0])
+                    norm_sampled = self.N_complement * _sum(jnp.exp(log_probs_sampled - rescale_shift))/_sum(random_samps.shape[0])
 
+                else:
+                    # Approximation to the norm correction from the sampled set (evaluated with self-normalizing importance sampling)
+                    norm_sampled = self.N_complement * _sum(jnp.exp(2 * log_prob_amps_complement))/_sum(jnp.exp(log_prob_amps_complement))
+
+                norm_estimate = norm_deterministic + norm_sampled
             else:
-                # Approximation to the norm correction from the sampled set (evaluated with self-normalizing importance sampling)
-                norm_sampled = self.N_complement * _sum(jnp.exp(2 * log_prob_amps_complement))/_sum(jnp.exp(log_prob_amps_complement))
-
-            norm_estimate = norm_deterministic + norm_sampled
+                norm_estimate = 1.
 
             prefactors_det = jnp.exp(log_prob_amps_deterministic)/norm_estimate
             prefactors_sampled = jnp.ones(log_prob_amps_complement.shape) * (1 - norm_deterministic/norm_estimate) / _sum(len(log_prob_amps_complement))
