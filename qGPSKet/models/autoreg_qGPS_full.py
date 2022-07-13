@@ -8,6 +8,7 @@ from netket.hilbert.homogeneous import HomogeneousHilbert
 from qGPSKet.nn.initializers import normal
 from jax.nn.initializers import zeros
 from .autoreg_qGPS import _normalize, gpu_cond, AbstractARqGPS
+from qGPSKet.models import qGPS
 
 
 class ARqGPSFull(AbstractARqGPS):
@@ -96,7 +97,7 @@ class ARqGPSFull(AbstractARqGPS):
 def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable) -> Union[Array, Array]:
     # Slice inputs at index-1 to count previous spins
     inputs_i = inputs[:, index-1] # (B,)
-    
+
     # Mask out parameters at j>index
     mask = jnp.triu(jnp.ones((hilbert.size, hilbert.size)), 1)
 
@@ -125,7 +126,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: A
     )
 
     # If Hilbert space associated with the model is constrained, i.e.
-    # model has "n_spins" in "cache" collection, then impose total magnetization.  
+    # model has "n_spins" in "cache" collection, then impose total magnetization.
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf
@@ -179,3 +180,22 @@ def _conditionals(model: ARqGPSFull, inputs: Array) -> Array:
     log_psi = jnp.transpose(log_psi, [1, 0, 2])
     log_psi = _normalize(log_psi, model.machine_pow)
     return log_psi # (B, L, D)
+
+class ARqGPSModPhaseFull(ARqGPSFull):
+    """
+    Implements an Ansatz composed of an autoregressive qGPS for the modulus of the amplitude and a qGPS for the phase.
+    """
+
+    def setup(self):
+        assert jnp.issubdtype(self.dtype, jnp.floating)
+        super().setup()
+        self._qgps = qGPS(
+            self.hilbert, self.hilbert.size,
+            dtype=jnp.float64,
+            init_fun=self.init_fun,
+            to_indices=self.to_indices)
+
+    def __call__(self, inputs: Array) -> Array:
+        log_psi_mod = super().__call__(inputs)
+        log_psi_phase = self._qgps(inputs)
+        return log_psi_mod + log_psi_phase*1j
