@@ -98,12 +98,11 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
             log_prob_amps_deterministic =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(self.deterministic_samples)
             log_prob_amps_complement =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(samples_from_complement)
 
-            # Renormalise the probability amplitudes for numerical stability
-            rescale_shift = _mpi_max_jax(jnp.max(jnp.concatenate((log_prob_amps_deterministic, log_prob_amps_complement))))[0]
-            log_prob_amps_deterministic -= rescale_shift
-            log_prob_amps_complement -= rescale_shift
-
             if self.renormalize:
+                # Renormalise the probability amplitudes for numerical stability
+                rescale_shift = _mpi_max_jax(jnp.max(jnp.concatenate((log_prob_amps_deterministic, log_prob_amps_complement))))[0]
+                log_prob_amps_deterministic -= rescale_shift
+                log_prob_amps_complement -= rescale_shift
                 # Contribution of the determinisitc set to the norm
                 norm_deterministic = _sum(jnp.exp(log_prob_amps_deterministic))
 
