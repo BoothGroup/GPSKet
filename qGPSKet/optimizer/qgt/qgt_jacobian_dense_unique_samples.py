@@ -37,7 +37,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
     if mode is None:
         mode = choose_jacobian_mode(vstate._apply_fun, vstate.parameters, vstate.model_state, vstate.samples[0], mode=mode, holomorphic=holomorphic)
     else:
-        assert(holomorphic is not None)
+        assert(holomorphic is None)
 
     chunk_size = None
 
@@ -82,11 +82,14 @@ def prepare_centered_oks(apply_fun: Callable, params: PyTree, samples_and_counts
 
     jacobians = nkjax.vmap_chunked(gradf_fun, in_axes=(None, 0), chunk_size=chunk_size)(params, samples)
 
-    reshaped_counts = counts.reshape((-1, 1))
+    if split_complex_params:
+        reshaped_counts = counts.reshape((-1, 1, 1))
+    else:
+        reshaped_counts = counts.reshape((-1, 1))
 
     jacobians_mean = _sum(reshaped_counts * jacobians, axis=0, keepdims=True)
 
     centered_oks =  jnp.sqrt(reshaped_counts) * (jacobians - jacobians_mean)
 
-    return centered_oks
+    return centered_oks.reshape(-1, centered_oks.shape[-1])
 
