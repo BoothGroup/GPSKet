@@ -9,7 +9,11 @@ __all__ = [
     "models",
     "nn",
     "operator",
-    "sampler"
+    "sampler",
+    "hilbert",
+    "driver",
+    "datasets",
+    "vqs"
 ]
 
 from . import models
@@ -17,3 +21,6 @@ from . import nn
 from . import operator
 from . import sampler
 from . import hilbert
+from . import driver
+from . import datasets
+from . import vqs

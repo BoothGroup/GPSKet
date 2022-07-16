@@ -10,7 +10,12 @@ def MetropolisFastHopping(hilbert, *args, clusters=None, graph=None, hop_probabi
 
     hoppingrule = FermionicHoppingRuleWithUpdates(hop_probability=hop_probability, transition_probs=transition_probs)
 
-    return MetropolisFastSampler(hilbert, hoppingrule, *args, **kwargs, dtype=np.uint8)
+    if not 'dtype' in kwargs:
+        kwargs['dtype'] = np.uint8
+    else:
+        assert np.issubdtype(kwargs['dtype'], np.unsignedinteger)
+
+    return MetropolisFastSampler(hilbert, hoppingrule, *args, **kwargs)
 
 def MetropolisHopping(hilbert, *args, clusters=None, graph=None, hop_probability=1.0, transition_probs=None, **kwargs) -> MetropolisFastSampler:
     from .rules.fermionic_hopping import FermionicHoppingRule
@@ -20,4 +25,9 @@ def MetropolisHopping(hilbert, *args, clusters=None, graph=None, hop_probability
 
     hoppingrule = FermionicHoppingRule(hop_probability=hop_probability, transition_probs=transition_probs)
 
-    return MetropolisSampler(hilbert, hoppingrule, *args, **kwargs, dtype=np.uint8)
+    if not 'dtype' in kwargs:
+        kwargs['dtype'] = np.uint8
+    else:
+        assert np.issubdtype(kwargs['dtype'], np.unsignedinteger)
+
+    return MetropolisSampler(hilbert, hoppingrule, *args, **kwargs)
