@@ -1,20 +1,13 @@
 import os
 import numpy as np
-from enum import Enum
 from typing import Optional, Tuple
 from netket.utils.types import Array
-from pyscf import scf, gto, ao2mo, fci, lo
+from pyscf import scf, gto, ao2mo, fci, ci, lo
 
 
 _DATA = "/tmp/qGPSKet_data/"
 
-class BasisType(Enum):
-    LOCAL = 0 # Meta-Löwdin
-    CANONICAL = 1
-    SPLIT = 2
-    BOYS = 3
-
-def _h2o_raw(basis_type):
+def _H2O_raw(basis, method, datapath):
     mol = gto.Mole()
 
     mol.build(
@@ -31,18 +24,19 @@ def _h2o_raw(basis_type):
     norb = myhf.mo_coeff.shape[1]
     print('Number of molecular orbitals: ', norb)
 
-    if not os.path.exists(_DATA):
-        os.makedirs(_DATA)
+    if not os.path.exists(datapath):
+        os.makedirs(datapath)
+    dsid = f"{basis}_{method}"
 
-    if not os.path.exists(os.path.join(_DATA, f"h1_{basis_type}.npy")):
+    if not os.path.exists(os.path.join(datapath, f"h1_{dsid}.npy")):
         loc_coeff = myhf.mo_coeff
-        if basis_type != 1:
+        if basis != 'CANONICAL':
             loc_coeff = lo.orth_ao(mol, 'meta_lowdin')
-            if basis_type == 3:
+            if basis == 'BOYS':
                 localizer = lo.Boys(mol, loc_coeff)
                 localizer.init_guess = None
                 loc_coeff = localizer.kernel()
-            if basis_type == 2:
+            if basis == 'SPLIT':
                 localizer = lo.Boys(mol, myhf.mo_coeff[:,:nelec//2])
                 loc_coeff_occ = localizer.kernel()
                 localizer = lo.Boys(mol, myhf.mo_coeff[:, nelec//2:])
@@ -54,18 +48,24 @@ def _h2o_raw(basis_type):
         # Find the hamiltonian in the local basis
         h1 = np.linalg.multi_dot((loc_coeff.T, myhf.get_hcore(), loc_coeff))
         h2 = ao2mo.restore(1, ao2mo.kernel(mol, loc_coeff), norb)
-        np.save(os.path.join(_DATA, f"h1_{basis_type}.npy"), h1)
-        np.save(os.path.join(_DATA, f"h2_{basis_type}.npy"), h2)
+        np.save(os.path.join(datapath, f"h1_{dsid}.npy"), h1)
+        np.save(os.path.join(datapath, f"h2_{dsid}.npy"), h2)
     else:
-        h1 = np.load(os.path.join(_DATA, f"h1_{basis_type}.npy"))
-        h2 = np.load(os.path.join(_DATA, f"h2_{basis_type}.npy"))
+        h1 = np.load(os.path.join(datapath, f"h1_{dsid}.npy"))
+        h2 = np.load(os.path.join(datapath, f"h2_{dsid}.npy"))
 
     nuc_en = mol.energy_nuc()
 
-    if not os.path.exists(os.path.join(_DATA, f"all_configs_H2O_{basis_type}.npy")):
-        # Run FCI
-        cisolver = fci.direct_spin1.FCISolver(mol)
-        e, c = cisolver.kernel(h1, h2, norb, nelec)
+    if not os.path.exists(os.path.join(datapath, f"all_configs_H2O_{dsid}.npy")):
+        if method == 'FCI':
+            # Run FCI
+            cisolver = fci.direct_spin1.FCISolver(mol)
+            e, c = cisolver.kernel(h1, h2, norb, nelec)
+        elif method == 'CISD':
+            # Run CISD
+            cisolver = ci.CISD(myhf)
+            e, c = cisolver.kernel()
+            c = cisolver.to_fcivec(c)
         configs = []
         amps = []
         def to_config(alpha, beta, n):
@@ -83,16 +83,28 @@ def _h2o_raw(basis_type):
                 amps.append(c[i,j])
         all_configurations = np.array(configs)
         all_amplitudes = np.array(amps)
-        np.save(os.path.join(_DATA, f"all_configs_H2O_{basis_type}.npy"), all_configurations)
-        np.save(os.path.join(_DATA, f"all_amplitudes_H2O_{basis_type}.npy"), all_amplitudes)
+        np.save(os.path.join(datapath, f"all_configs_H2O_{dsid}.npy"), all_configurations)
+        np.save(os.path.join(datapath, f"all_amplitudes_H2O_{dsid}.npy"), all_amplitudes)
     else:
-        all_configurations = np.load(os.path.join(_DATA, f"all_configs_H2O_{basis_type}.npy"))
-        all_amplitudes = np.load(os.path.join(_DATA, f"all_amplitudes_H2O_{basis_type}.npy"))
+        all_configurations = np.load(os.path.join(datapath, f"all_configs_H2O_{dsid}.npy"))
+        all_amplitudes = np.load(os.path.join(datapath, f"all_amplitudes_H2O_{dsid}.npy"))
 
     return all_configurations, all_amplitudes
 
-def get_h2o_dataset(basis_type: int = BasisType.CANONICAL, select_largest: Optional[int] = None) -> Tuple[Array, Array]:
-    configurations, amplitudes = _h2o_raw(basis_type)
+def get_H2O_dataset(basis: str = 'CANONICAL', method: str = 'FCI', select_largest: Optional[int] = None, datapath: str = _DATA) -> Tuple[Array, Array]:
+    """
+    Return a dataset of configurations and amplitudes for the ground state of H2O computed with `method` in `basis`.
+
+    Args:
+        basis : basis type in which the ground state is computed; currently supported: CANONICAL, LOCAL, BOYS and SPLIT (default: CANONICAL) 
+        method : method used to compute the ground state, either FCI or CISD (default: FCI)
+        select_largest : number of configurations with largest probability returned (default: None)
+        datapath : path to where the datasets and intermediate values are stored
+
+    Returns:
+        A tuple (configurations, aomplitudes) of all the configurations and amplitudes selected, if `select_largest` is `None` all configurations are returned
+    """
+    configurations, amplitudes = _H2O_raw(basis.upper(), method.upper(), datapath=datapath)
     if select_largest:
         largest_amplitudes_ids = np.argsort(np.abs(amplitudes)**2)[-select_largest:]
         amplitudes = amplitudes[largest_amplitudes_ids]
