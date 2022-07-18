@@ -416,6 +416,8 @@ class QGPSLearningExp(QGPSLearning):
                 else:
                     alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
 
+                if np.any(alpha < 0.):
+                    print("Warning! clipping alpha < 0")
                 self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
 
                 self.setup_fit_alpha_dep()
@@ -567,25 +569,28 @@ class QGPSLearningExp(QGPSLearning):
 
         feature_index = np.argmax(deltaL)
 
+        alpha = self.alpha_mat_ref_sites
         if theta[feature_index] > 0:
             if self.complex_expand and self.epsilon.dtype==complex:
-                self.alpha_mat_ref_sites[feature_index] = 2 * (s[feature_index] ** 2 / theta[feature_index])
+                alpha[feature_index] = 2 * (s[feature_index] ** 2 / theta[feature_index])
             else:
-                self.alpha_mat_ref_sites[feature_index] = s[feature_index] ** 2 / theta[feature_index]
+                alpha[feature_index] = s[feature_index] ** 2 / theta[feature_index]
         else:
             # at least one active features
             if self.active_elements[feature_index] == True and np.sum(self.active_elements) >= 2:
-                self.alpha_mat_ref_sites[feature_index] = np.PINF
+                alpha[feature_index] = np.PINF
+        self.alpha_mat_ref_sites = alpha
 
         return
 
 
-    def fit_step_growing_RVM(self, confset, target_amplitudes, ref_site,alpha_iterations=None, multiplication=None, weightings=None, prior_mean=0.):
-        self.setup_fit(confset, target_amplitudes, ref_site, multiplication=multiplication, weightings=weightings, prior_mean=prior_mean)
+    def fit_step_growing_RVM(self, confset, target_amplitudes, ref_site, alpha_iterations, weightings=None, prior_mean=0.):
+        self.setup_fit(confset, target_amplitudes, ref_site, weightings=weightings, prior_mean=prior_mean)
 
         if np.max(self.active_elements) == 0:
+            alpha = self.alpha_mat_ref_sites
             if np.min(abs(np.diag(self.KtK))) < np.finfo(np.float32).eps:
-                self.alpha_mat_ref_sites[0] = np.finfo(np.float32).eps
+                alpha[0] = np.finfo(np.float32).eps
             else:
                 projections = (abs(self.y) **2 / np.diag(self.KtK))
                 ind = np.argmax(projections)
@@ -593,14 +598,15 @@ class QGPSLearningExp(QGPSLearning):
                 alpha_est = (((np.diag(self.KtK))**2 / (abs(self.y)**2 - np.diag(self.KtK))).real)[ind]
 
                 if alpha_est > 0.:
-                    self.alpha_mat_ref_sites[ind] = alpha_est
+                    alpha[ind] = alpha_est
                     if self.complex_expand and self.epsilon.dtype==complex:
-                        self.alpha_mat_ref_sites[ind] *= 2
+                        alpha[ind] *= 2
                 else:
-                    self.alpha_mat_ref_sites[ind] = 1.
+                    alpha[ind] = 1.
                     if self.complex_expand and self.epsilon.dtype==complex:
-                        self.alpha_mat_ref_sites[ind] *= 2
+                        alpha[ind] *= 2
                     print(alpha_est)
+            self.alpha_mat_ref_sites = alpha
             self.setup_fit_alpha_dep()
 
         for i in range(alpha_iterations):
