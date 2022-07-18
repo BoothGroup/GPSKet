@@ -25,9 +25,9 @@ class ARStateFitting(AbstractStateFittingDriver):
         mini_batch = (self._dataset[0][mini_batch_ids], self._dataset[1][mini_batch_ids])
 
         # Compute loss and gradient
-        self.loss, grad = _loss_and_grad(self.state.parameters, self.state.model_state, self.state._apply_fun, mini_batch)
+        self.loss, self._loss_grad = _loss_and_grad(self.state.parameters, self.state.model_state, self.state._apply_fun, mini_batch)
 
-        return grad
+        return self._loss_grad
 
     def __repr__(self):
         return (
