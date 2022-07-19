@@ -133,6 +133,7 @@ class MCStateStratifiedSampling(MCStateUniqeSamples):
 
                 norm_estimate = norm_deterministic + norm_sampled
             else:
+                norm_deterministic = _sum(jnp.exp(log_prob_amps_deterministic))
                 norm_estimate = 1.
 
             prefactors_det = jnp.exp(log_prob_amps_deterministic)/norm_estimate
