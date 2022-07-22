@@ -20,7 +20,12 @@ from mpi4py import MPI
 from threadpoolctl import threadpool_limits
 
 class QGPSLearning():
-    def __init__(self, epsilon, init_alpha=1.0, complex_expand=False):
+    def __init__(self, epsilon, init_alpha=1.0, complex_expand=False, K=None):
+        self.K = K
+        if self.K is not None:
+            self.precomputed_features = True
+        else:
+            self.precomputed_features = False
         self.complex_expand = complex_expand
         self._epsilon = None
         self.epsilon = np.array(epsilon)
@@ -28,15 +33,20 @@ class QGPSLearning():
         (we don't want to create a new arange each time we need it), can probably
         be done a little bit more elegantly
         """
-        self.K = None
         self.weights = None
         self.site_prod = None
         self.confs = None
         self._ref_sites = None
-        if self.complex_expand and self.epsilon.dtype==complex:
-            self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*2*self.epsilon.shape[1]))*init_alpha
+        if self.precomputed_features:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                self.alpha_mat = np.ones(self.K.shape[0]*2)*init_alpha
+            else:
+                self.alpha_mat = np.ones(self.K.shape[0])*init_alpha
         else:
-            self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*self.epsilon.shape[1]))*init_alpha
+            if self.complex_expand and self.epsilon.dtype==complex:
+                self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*2*self.epsilon.shape[1]))*init_alpha
+            else:
+                self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*self.epsilon.shape[1]))*init_alpha
 
         self.alpha_cutoff = 1.e10
         self.kern_cutoff = 1.e-10
@@ -75,11 +85,17 @@ class QGPSLearning():
 
     @property
     def alpha_mat_ref_sites(self):
-        return self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids]
+        if self.precomputed_features:
+            return self.alpha_mat
+        else:
+            return self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids]
 
     @alpha_mat_ref_sites.setter
     def alpha_mat_ref_sites(self, alpha):
-        self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids] = alpha
+        if self.precomputed_features:
+            self.alpha_mat = alpha
+        else:
+            self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids] = alpha
 
     @staticmethod
     @njit()
@@ -138,37 +154,39 @@ class QGPSLearning():
 
     def set_kernel_mat(self, confs, update_K=False):
         assert(self.ref_sites is not None)
-        recompute_site_prod = False
+        if not self.precomputed_features:
+            recompute_site_prod = False
 
-        if len(confs.shape) == 2:
-            confs = np.expand_dims(confs, axis=-1)
+            if len(confs.shape) == 2:
+                confs = np.expand_dims(confs, axis=-1)
 
-        if self.confs is not None:
-            if not np.array_equal(self.confs, confs) or self.site_prod is None:
+            if self.confs is not None:
+                if not np.array_equal(self.confs, confs) or self.site_prod is None:
+                    recompute_site_prod = True
+                elif not np.array_equal(self.ref_sites, self.site_prod_ref_sites):
+                    self.update_site_prod()
+                    update_K = True
+            else:
                 recompute_site_prod = True
-            elif not np.array_equal(self.ref_sites, self.site_prod_ref_sites):
-                self.update_site_prod()
+
+            if recompute_site_prod:
+                self.confs = confs
+                self.compute_site_prod()
+                self.K = None
+
+            if self.K is None:
+                self.K = np.zeros((confs.shape[0], self.epsilon.shape[1] * self.epsilon.shape[0]), dtype=self.epsilon.dtype)
                 update_K = True
-        else:
-            recompute_site_prod = True
 
-        if recompute_site_prod:
-            self.confs = confs
-            self.compute_site_prod()
-            self.K = None
-
-        if self.K is None:
-            self.K = np.zeros((confs.shape[0], self.epsilon.shape[1] * self.epsilon.shape[0]), dtype=self.epsilon.dtype)
-            update_K = True
-
-        if update_K:
-            self.K = self.kernel_mat_inner(self.site_prod, self.confs, self.K, self.ref_sites)
+            if update_K:
+                self.K = self.kernel_mat_inner(self.site_prod, self.confs, self.K, self.ref_sites)
 
         return self.K
 
     def reset(self):
         self.site_prod = None
-        self.K = None
+        if not self.precomputed_features:
+            self.K = None
 
     def setup_fit_alpha_dep(self):
         self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
@@ -269,8 +287,8 @@ class QGPSLearning():
 
 
 class QGPSLearningExp(QGPSLearning):
-    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, complex_expand=False):
-        super().__init__(epsilon, init_alpha=init_alpha, complex_expand=complex_expand)
+    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, complex_expand=False, K=None):
+        super().__init__(epsilon, init_alpha=init_alpha, complex_expand=complex_expand, K=K)
 
         self.noise_tilde = init_noise_tilde
 
@@ -474,8 +492,8 @@ class QGPSLearningExp(QGPSLearning):
 
         if opt_alpha:
             self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
-
-        self.update_epsilon_with_weights(prior_mean=prior_mean)
+        if not self.precomputed_features:
+            self.update_epsilon_with_weights(prior_mean=prior_mean)
         return
 
     '''
@@ -614,6 +632,7 @@ class QGPSLearningExp(QGPSLearning):
             self.update_precisions(s, q, S, Q)
             self.setup_fit_alpha_dep()
 
-        self.update_epsilon_with_weights()
+        if not self.precomputed_features:
+            self.update_epsilon_with_weights()
 
         return
