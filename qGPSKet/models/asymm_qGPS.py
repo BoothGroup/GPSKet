@@ -35,7 +35,7 @@ class ASymmqGPS(nn.Module):
     symmetrization: str = 'kernel'
     """Symmetrization method"""
     spin_symmetry_by_structure: bool = False
-     """ Flag determines whether the S^2 symmetry (with S=0) should be enforced
+    """Flag determines whether the S^2 symmetry (with S=0) should be enforced
     by using the same orbitals for up and down spin.
     """
     apply_fast_update: bool = True
@@ -90,7 +90,7 @@ class ASymmqGPSProd(nn.Module):
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
     spin_symmetry_by_structure: bool = False
-     """ Flag determines whether the S^2 symmetry (with S=0) should be enforced
+    """Flag determines whether the S^2 symmetry (with S=0) should be enforced
     by using the same orbitals for up and down spin.
     """
     apply_fast_update: bool = True
