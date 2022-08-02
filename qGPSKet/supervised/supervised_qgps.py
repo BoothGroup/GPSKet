@@ -664,8 +664,6 @@ class QGPSGenLinMod(QGPSLearningExp):
         self.valid_kern = _mpi_sum(np.sum(abs(K), axis=0)) > self.kern_cutoff
         self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
 
-        weights = weights[self.active_elements]
-
         pred = np.exp(K.dot(weights))
         g = pred * (self.exp_amps - pred).conj()
         grad = -K.T.dot(g)
