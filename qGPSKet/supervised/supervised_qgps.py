@@ -438,7 +438,6 @@ class QGPSLearningExp(QGPSLearning):
                     print("Warning! clipping alpha < 0")
                 self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
 
-                self.setup_fit_alpha_dep()
                 j += 1
                 if np.sum(abs(self.alpha_mat_ref_sites - alpha_old)**2) < self.alpha_convergence_tol:
                     converged = True
@@ -446,6 +445,8 @@ class QGPSLearningExp(QGPSLearning):
                 if max_iterations is not None:
                     if j >= max_iterations:
                         converged = True
+                if not converged:
+                    self.setup_fit_alpha_dep()
             else:
                 converged = True
 
@@ -636,3 +637,109 @@ class QGPSLearningExp(QGPSLearning):
             self.update_epsilon_with_weights()
 
         return
+
+class QGPSGenLinMod(QGPSLearningExp):
+    def setup_fit(self, confset, target_amplitudes, ref_sites):
+        self.ref_sites = ref_sites
+        self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
+        self.set_kernel_mat(confset)
+        self.setup_fit_alpha_dep()
+
+    def setup_fit_alpha_dep(self):
+        self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
+
+        if self.precomputed_features:
+            assert self.weights is not None
+            weights = self.weights
+        else:
+            weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+            if self.complex_expand and self.epsilon.dtype==complex:
+                weights = np.concatenate((weights.real, weights.imag))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            K = np.hstack((self.K, 1.j * self.K))
+        else:
+            K = self.K
+
+        self.valid_kern = _mpi_sum(np.sum(abs(K), axis=0)) > self.kern_cutoff
+        self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
+
+        weights = weights[self.active_elements]
+
+        pred = np.exp(K.dot(weights))
+        g = pred * (self.exp_amps - pred).conj()
+        grad = -K.T.dot(g)
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            grad = grad.real
+
+        grad = _mpi_sum(grad)
+
+        b_1 = pred * (self.exp_amps - pred).conj()
+        b_2 = pred * pred.conj()
+
+        hess_a = -np.dot(K.T * b_1, K)
+        hess_b = np.dot(K.T * b_2, K.conj())
+
+        hessian = _mpi_sum(hess_a + hess_b)
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            grad += self.alpha_mat_ref_sites/2 * weights
+            self.KtK_alpha = (hessian + np.diag(self.alpha_mat_ref_sites/2)).real
+        else:
+            grad += self.alpha_mat_ref_sites * weights
+            self.KtK_alpha = hessian + np.diag(self.alpha_mat_ref_sites)
+
+        self.cholesky = False
+
+
+        weights = weights[self.active_elements]
+
+        self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
+        if self.active_elements.any():
+            if _rank == 0:
+                with threadpool_limits(limits=self.max_threads, user_api="blas"):
+                    try:
+                        L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
+                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
+                        np.copyto(weights, weights - sp.linalg.cho_solve((L, True), grad[self.active_elements]))
+                        self.cholesky = True
+                    except:
+                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)]))
+                        np.copyto(weights, weights - self.Sinv.dot(grad[self.active_elements]))
+
+            _MPI_comm.Bcast(self.Sinv, root=0)
+            _MPI_comm.Bcast(weights, root=0)
+            self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
+
+            # This bit is just to emphasize that self.Sinv is not the inverse of sigma but its Cholesky decomposition if self.cholesky==True
+            if self.cholesky:
+                self.Sinv_L = self.Sinv
+                self.Sinv = None
+
+        if self.weights is None:
+            if not self.complex_expand and self.epsilon.dtype==complex:
+                self.weights = np.zeros(self.alpha_mat_ref_sites.shape[0], dtype=complex)
+            else:
+                self.weights = np.zeros(self.alpha_mat_ref_sites.shape[0], dtype=float)
+
+        else:
+            self.weights.fill(0.0)
+
+        if self.active_elements.any() > 0:
+            self.weights[self.active_elements] = weights
+
+        if not self.precomputed_features:
+            self.update_epsilon_with_weights()
+
+    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, max_alpha_iterations=None, rvm=False):
+        self.setup_fit(confset, target_amplitudes, ref_sites)
+
+        if opt_alpha:
+            self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
+
+        if not self.precomputed_features:
+            self.update_epsilon_with_weights()
+
+    def log_marg_lik(self):
+        pass
