@@ -34,6 +34,10 @@ class ASymmqGPS(nn.Module):
     """Function to apply symmetries to configurations"""
     symmetrization: str = 'kernel'
     """Symmetrization method"""
+    spin_symmetry_by_structure: bool = False
+    """Flag determines whether the S^2 symmetry (with S=0) should be enforced
+    by using the same orbitals for up and down spin.
+    """
     apply_fast_update: bool = True
     """Whether fast update is used in the computation of the Slater determinants"""
 
@@ -65,7 +69,8 @@ class ASymmqGPS(nn.Module):
             init_fun=self.init_fun,
             symmetries=self.apply_symmetries,
             out_transformation=out_transformation,
-            apply_fast_update=self.apply_fast_update
+            apply_fast_update=self.apply_fast_update,
+            spin_symmetry_by_structure=self.spin_symmetry_by_structure
         )(x)
         return log_psi
 
@@ -84,6 +89,10 @@ class ASymmqGPSProd(nn.Module):
     """Initializer for the variational parameters"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
+    spin_symmetry_by_structure: bool = False
+    """Flag determines whether the S^2 symmetry (with S=0) should be enforced
+    by using the same orbitals for up and down spin.
+    """
     apply_fast_update: bool = True
     """Whether fast update is used in the computation of the Slater determinants"""
 
@@ -110,6 +119,7 @@ class ASymmqGPSProd(nn.Module):
             init_fun=self.init_fun,
             symmetries=self.apply_symmetries,
             out_transformation=out_transformation,
-            apply_fast_update=self.apply_fast_update
+            apply_fast_update=self.apply_fast_update,
+            spin_symmetry_by_structure=self.spin_symmetry_by_structure
         )(x)
         return log_psi
