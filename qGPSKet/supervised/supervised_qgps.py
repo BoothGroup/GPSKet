@@ -729,11 +729,11 @@ class QGPSGenLinMod(QGPSLearningExp):
                     try:
                         L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
                         np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        np.copyto(weights, weights - sp.linalg.cho_solve((L, True), self.grad[self.active_elements]))
+                        np.copyto(weights, weights - sp.linalg.cho_solve((L, True), self.grad))
                         self.cholesky = True
                     except:
                         np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
-                        np.copyto(weights, weights - self.Sinv.dot(self.grad[self.active_elements]))
+                        np.copyto(weights, weights - self.Sinv.dot(self.grad))
 
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(weights, root=0)
