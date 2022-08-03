@@ -680,9 +680,9 @@ class QGPSGenLinMod(QGPSLearningExp):
             pred = np.exp(K.dot(weights))
             loss = _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
             if self.complex_expand and self.epsilon.dtype==complex:
-                loss += np.sum(self.alpha_mat_ref_sites/2 * abs(weights)**2)
+                loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
             else:
-                loss += np.sum(self.alpha_mat_ref_sites * abs(weights)**2)
+                loss += np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
             return loss/2
 
         def get_grad(weights):
@@ -692,9 +692,9 @@ class QGPSGenLinMod(QGPSLearningExp):
             grad = beta * _mpi_sum(grad)
             if self.complex_expand and self.epsilon.dtype==complex:
                 grad = grad.real
-                grad += self.alpha_mat_ref_sites/2 * weights
+                grad += self.alpha_mat_ref_sites[self.active_elements]/2 * weights
             else:
-                grad += self.alpha_mat_ref_sites * weights
+                grad += self.alpha_mat_ref_sites[self.active_elements] * weights
             return grad
 
         def get_hessian(weights):
@@ -708,9 +708,9 @@ class QGPSGenLinMod(QGPSLearningExp):
             hessian = beta * _mpi_sum(hess_a + hess_b)
 
             if self.complex_expand and self.epsilon.dtype==complex:
-                hessian = (hessian + np.diag(self.alpha_mat_ref_sites/2)).real
+                hessian = (hessian + np.diag(self.alpha_mat_ref_sites[self.active_elements]/2)).real
             else:
-                hessian = hessian + np.diag(self.alpha_mat_ref_sites)
+                hessian = hessian + np.diag(self.alpha_mat_ref_sites[self.active_elements])
 
             return hessian
 
@@ -808,9 +808,9 @@ class QGPSGenLinMod(QGPSLearningExp):
         loss = beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            loss += np.sum(self.alpha_mat_ref_sites/2 * abs(weights)**2)
+            loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
         else:
-            loss += np.sum(self.alpha_mat_ref_sites * abs(weights)**2)
+            loss += np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
 
         log_lik -= loss
 
