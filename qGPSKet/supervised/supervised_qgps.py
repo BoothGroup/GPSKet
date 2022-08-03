@@ -765,5 +765,56 @@ class QGPSGenLinMod(QGPSLearningExp):
         if not self.precomputed_features:
             self.update_epsilon_with_weights()
 
+    # TODO: fix prefactors, double check, etc.
     def log_marg_lik(self):
-        pass
+        N_data = _mpi_sum(len(self.exp_amps))
+
+        if self.noise_tilde != 0.:
+            beta = 1/self.noise_tilde
+        else:
+            beta = 1.
+
+        if self.epsilon.dtype==complex:
+            log_lik = (beta - np.log(np.pi)) * N_data
+        else:
+            log_lik = (beta - np.log(2*np.pi)) * N_data
+
+
+        if self.cholesky:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.sum(np.log(0.5 * abs(np.diag(self.Sinv_L))**2))
+            else:
+                log_lik += 2 * np.sum(np.log(abs(np.diag(self.Sinv_L))))
+        else:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
+            else:
+                log_lik += np.linalg.slogdet(self.Sinv)[1]
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            log_lik += 0.5 * np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
+        else:
+            log_lik += np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            K = np.hstack((self.K, 1.j * self.K))
+        else:
+            K = self.K
+
+        K = K[:, self.active_elements]
+        weights = self.weights[self.active_elements]
+
+        pred = np.exp(K.dot(weights))
+        loss = beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            loss += np.sum(self.alpha_mat_ref_sites/2 * abs(weights)**2)
+        else:
+            loss += np.sum(self.alpha_mat_ref_sites * abs(weights)**2)
+
+        log_lik -= loss
+
+        if self.epsilon.dtype==float:
+            log_lik *= 0.5
+
+        return log_lik.real
