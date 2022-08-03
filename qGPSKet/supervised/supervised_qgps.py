@@ -639,22 +639,31 @@ class QGPSLearningExp(QGPSLearning):
         return
 
 class QGPSGenLinMod(QGPSLearningExp):
-    def setup_fit(self, confset, target_amplitudes, ref_sites):
+    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None):
         self.ref_sites = ref_sites
+        self.weights = None
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
         self.set_kernel_mat(confset)
-        self.setup_fit_alpha_dep()
+        self.setup_fit_alpha_dep(minimize_fun=minimize_fun)
 
-    def setup_fit_alpha_dep(self):
+    def setup_fit_alpha_dep(self, minimize_fun=None):
         self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
+
+        if self.noise_tilde != 0.:
+            beta = 1/self.noise_tilde
+        else:
+            beta = 1.
 
         if self.precomputed_features:
             assert self.weights is not None
             weights = self.weights
         else:
-            weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
-            if self.complex_expand and self.epsilon.dtype==complex:
-                weights = np.concatenate((weights.real, weights.imag))
+            if self.weights is None:
+                weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+                if self.complex_expand and self.epsilon.dtype==complex:
+                    weights = np.concatenate((weights.real, weights.imag))
+            else:
+                weights = self.weights
 
         if self.complex_expand and self.epsilon.dtype==complex:
             K = np.hstack((self.K, 1.j * self.K))
@@ -664,47 +673,67 @@ class QGPSGenLinMod(QGPSLearningExp):
         self.valid_kern = _mpi_sum(np.sum(abs(K), axis=0)) > self.kern_cutoff
         self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
 
-        pred = np.exp(K.dot(weights))
-        g = pred * (self.exp_amps - pred).conj()
-        grad = -K.T.dot(g)
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            grad = grad.real
-
-        grad = _mpi_sum(grad)
-
-        b_1 = pred * (self.exp_amps - pred).conj()
-        b_2 = pred * pred.conj()
-
-        hess_a = -np.dot(K.T * b_1, K)
-        hess_b = np.dot(K.T * b_2, K.conj())
-
-        hessian = _mpi_sum(hess_a + hess_b)
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            grad += self.alpha_mat_ref_sites/2 * weights
-            self.KtK_alpha = (hessian + np.diag(self.alpha_mat_ref_sites/2)).real
-        else:
-            grad += self.alpha_mat_ref_sites * weights
-            self.KtK_alpha = hessian + np.diag(self.alpha_mat_ref_sites)
-
-        self.cholesky = False
-
-
+        K = K[:, self.active_elements]
         weights = weights[self.active_elements]
 
+        def get_loss(weights):
+            pred = np.exp(K.dot(weights))
+            loss = _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+            if self.complex_expand and self.epsilon.dtype==complex:
+                loss += np.sum(self.alpha_mat_ref_sites/2 * abs(weights)**2)
+            else:
+                loss += np.sum(self.alpha_mat_ref_sites * abs(weights)**2)
+            return loss/2
+
+        def get_grad(weights):
+            pred = np.exp(K.dot(weights))
+            g = pred * (self.exp_amps - pred).conj()
+            grad = - K.T.dot(g)
+            grad = beta * _mpi_sum(grad)
+            if self.complex_expand and self.epsilon.dtype==complex:
+                grad = grad.real
+                grad += self.alpha_mat_ref_sites/2 * weights
+            else:
+                grad += self.alpha_mat_ref_sites * weights
+            return grad
+
+        def get_hessian(weights):
+            pred = np.exp(K.dot(weights))
+            b_1 = pred * (self.exp_amps - pred).conj()
+            b_2 = pred * pred.conj()
+
+            hess_a = -np.dot(K.T * b_1, K)
+            hess_b = np.dot(K.T * b_2, K.conj())
+
+            hessian = beta * _mpi_sum(hess_a + hess_b)
+
+            if self.complex_expand and self.epsilon.dtype==complex:
+                hessian = (hessian + np.diag(self.alpha_mat_ref_sites/2)).real
+            else:
+                hessian = hessian + np.diag(self.alpha_mat_ref_sites)
+
+            return hessian
+
+        if minimize_fun is not None:
+            min_result = minimize_fun(get_loss, weights, jac=get_grad, hess=get_hessian)
+            weights = min_result.x
+
+        self.KtK_alpha = get_hessian(weights)
+        self.grad = get_grad(weights)
+
+        self.cholesky = False
         self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
         if self.active_elements.any():
             if _rank == 0:
                 with threadpool_limits(limits=self.max_threads, user_api="blas"):
                     try:
-                        L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
+                        L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
                         np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        np.copyto(weights, weights - sp.linalg.cho_solve((L, True), grad[self.active_elements]))
+                        np.copyto(weights, weights - sp.linalg.cho_solve((L, True), self.grad[self.active_elements]))
                         self.cholesky = True
                     except:
-                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)]))
-                        np.copyto(weights, weights - self.Sinv.dot(grad[self.active_elements]))
+                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
+                        np.copyto(weights, weights - self.Sinv.dot(self.grad[self.active_elements]))
 
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(weights, root=0)
@@ -727,11 +756,8 @@ class QGPSGenLinMod(QGPSLearningExp):
         if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
-        if not self.precomputed_features:
-            self.update_epsilon_with_weights()
-
-    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, max_alpha_iterations=None, rvm=False):
-        self.setup_fit(confset, target_amplitudes, ref_sites)
+    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, max_alpha_iterations=None, rvm=False, minimize_fun=None):
+        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun)
 
         if opt_alpha:
             self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
