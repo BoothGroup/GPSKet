@@ -678,7 +678,7 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         def get_loss(weights):
             pred = np.exp(K.dot(weights))
-            loss = _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+            loss = beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
             if self.complex_expand and self.epsilon.dtype==complex:
                 loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
             else:
