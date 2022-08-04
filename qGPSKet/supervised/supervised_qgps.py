@@ -775,9 +775,9 @@ class QGPSGenLinMod(QGPSLearningExp):
             beta = 1.
 
         if self.epsilon.dtype==complex:
-            log_lik = (beta - np.log(np.pi)) * N_data
+            log_lik = (np.log(beta) - np.log(np.pi)) * N_data
         else:
-            log_lik = (beta - np.log(2*np.pi)) * N_data
+            log_lik = (np.log(beta) - np.log(2*np.pi)) * N_data
 
 
         if self.cholesky:
