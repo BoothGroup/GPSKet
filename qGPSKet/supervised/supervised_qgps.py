@@ -453,8 +453,10 @@ class QGPSLearningExp(QGPSLearning):
                         convergence_loss += abs(self.beta - beta_old)**2
                     if convergence_loss < self.alpha_convergence_tol:
                         converged = True
-                    np.copyto(alpha_old, self.alpha_mat_ref_sites)
-                    beta_old = self.beta
+                    if opt_alpha:
+                        np.copyto(alpha_old, self.alpha_mat_ref_sites)
+                    if opt_beta:
+                        beta_old = self.beta
                     if max_iterations is not None:
                         if j >= max_iterations:
                             converged = True
