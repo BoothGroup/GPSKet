@@ -408,47 +408,60 @@ class QGPSLearningExp(QGPSLearning):
 
         return derivative_noise.real
 
-    def opt_alpha(self, max_iterations=None, rvm=False):
-        alpha_old = self.alpha_mat_ref_sites.copy()
-        converged = False
-        j = 0
-        if max_iterations is not None:
-            if j >= max_iterations:
-                converged = True
-        while not converged:
-            if np.any(self.active_elements):
-                if self.cholesky:
-                    diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
-                else:
-                    diag_Sinv = np.diag(self.Sinv).real
-
-                if self.complex_expand and self.epsilon.dtype==complex:
-                    diag_Sinv = diag_Sinv * 0.5
-
-                gamma = (1 - (self.alpha_mat_ref_sites[self.active_elements])*diag_Sinv)
-
-                alpha = self.alpha_mat_ref_sites
-
-                if rvm:
-                    alpha[self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
-                else:
-                    alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
-
-                if np.any(alpha < 0.):
-                    print("Warning! clipping alpha < 0")
-                self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
-
-                j += 1
-                if np.sum(abs(self.alpha_mat_ref_sites - alpha_old)**2) < self.alpha_convergence_tol:
+    def opt_alpha_beta(self, opt_alpha=True, opt_beta=False, max_iterations=None, rvm=False):
+        if opt_alpha or opt_beta:
+            alpha_old = self.alpha_mat_ref_sites.copy()
+            if opt_beta:
+                assert(self.beta is not None and self.neg_log_likelihood is not None and self.N_data is not None)
+                beta_old = self.beta
+            converged = False
+            j = 0
+            if max_iterations is not None:
+                if j >= max_iterations:
                     converged = True
-                np.copyto(alpha_old, self.alpha_mat_ref_sites)
-                if max_iterations is not None:
-                    if j >= max_iterations:
+            while not converged:
+                if np.any(self.active_elements):
+                    if self.cholesky:
+                        diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
+                    else:
+                        diag_Sinv = np.diag(self.Sinv).real
+
+                    if self.complex_expand and self.epsilon.dtype==complex:
+                        diag_Sinv = diag_Sinv * 0.5
+
+                    gamma = (1 - (self.alpha_mat_ref_sites[self.active_elements])*diag_Sinv)
+
+                    alpha = self.alpha_mat_ref_sites
+
+                    if opt_alpha:
+                        if rvm:
+                            alpha[self.active_elements] = (gamma/((self.weights.conj()*self.weights)[self.active_elements])).real
+                        else:
+                            alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
+
+                        if np.any(alpha < 0.):
+                            print("Warning! clipping alpha < 0")
+                        self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
+                    if opt_beta:
+                        self.beta = (self.N_data - np.sum(gamma))/(self.neg_log_likelihood/self.beta)
+
+                    j += 1
+                    convergence_loss = 0.
+                    if opt_alpha:
+                        convergence_loss += np.sum(abs(self.alpha_mat_ref_sites - alpha_old)**2)
+                    if opt_beta:
+                        convergence_loss += abs(self.beta - beta_old)**2
+                    if convergence_loss < self.alpha_convergence_tol:
                         converged = True
-                if not converged:
-                    self.setup_fit_alpha_dep()
-            else:
-                converged = True
+                    np.copyto(alpha_old, self.alpha_mat_ref_sites)
+                    beta_old = self.beta
+                    if max_iterations is not None:
+                        if j >= max_iterations:
+                            converged = True
+                    if not converged:
+                        self.setup_fit_alpha_dep()
+                else:
+                    converged = True
 
     def fit_step(self, confset, target_amplitudes, ref_sites, noise_bounds=[(None, None)],
                  opt_alpha=True, opt_noise=True, max_alpha_iterations=None, max_noise_iterations=None, rvm=False,
@@ -462,7 +475,7 @@ class QGPSLearningExp(QGPSLearning):
                     np.copyto(self.alpha_mat_ref_sites, alpha_init)
                 self.setup_fit_noise_dep(weightings=weightings)
                 if opt_alpha:
-                    self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
+                    self.opt_alpha_beta(max_iterations=max_alpha_iterations, rvm=rvm)
                 return -self.log_marg_lik()
 
             def derivative(x):
@@ -471,14 +484,14 @@ class QGPSLearningExp(QGPSLearning):
                     np.copyto(self.alpha_mat_ref_sites, alpha_init)
                 self.setup_fit_noise_dep(weightings=weightings)
                 if opt_alpha:
-                    self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
+                    self.opt_alpha_beta(max_iterations=max_alpha_iterations, rvm=rvm)
                 der_noise = self.log_marg_lik_noise_der()
                 return - der_noise * np.exp(x)
 
             def update_alpha(x):
                 self.noise_tilde = np.exp(x[0])
                 if opt_alpha:
-                    self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
+                    self.opt_alpha_beta(max_iterations=max_alpha_iterations, rvm=rvm)
                 np.copyto(alpha_init, self.alpha_mat_ref_sites)
 
             if max_noise_iterations is not None:
@@ -492,7 +505,7 @@ class QGPSLearningExp(QGPSLearning):
             self.setup_fit_noise_dep(weightings=weightings)
 
         if opt_alpha:
-            self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
+            self.opt_alpha_beta(max_iterations=max_alpha_iterations, rvm=rvm)
         if not self.precomputed_features:
             self.update_epsilon_with_weights(prior_mean=prior_mean)
         return
@@ -644,15 +657,15 @@ class QGPSGenLinMod(QGPSLearningExp):
         self.weights = None
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
         self.set_kernel_mat(confset)
+        self.N_data = _mpi_sum(len(self.exp_amps))
+        if self.noise_tilde != 0.:
+            self.beta = 1/self.noise_tilde
+        else:
+            self.beta = 1.
         self.setup_fit_alpha_dep(minimize_fun=minimize_fun)
 
     def setup_fit_alpha_dep(self, minimize_fun=None):
         self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
-
-        if self.noise_tilde != 0.:
-            beta = 1/self.noise_tilde
-        else:
-            beta = 1.
 
         if self.precomputed_features:
             assert self.weights is not None
@@ -678,18 +691,18 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         def get_loss(weights):
             pred = np.exp(K.dot(weights))
-            loss = beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+            self.neg_log_likelihood = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
             if self.complex_expand and self.epsilon.dtype==complex:
-                loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
+                loss = self.neg_log_likelihood + np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
             else:
-                loss += np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
+                loss = self.neg_log_likelihood + np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
             return loss/2
 
         def get_grad(weights):
             pred = np.exp(K.dot(weights))
             g = pred * (self.exp_amps - pred).conj()
             grad = - K.T.dot(g)
-            grad = beta * _mpi_sum(grad)
+            grad = self.beta * _mpi_sum(grad)
             if self.complex_expand and self.epsilon.dtype==complex:
                 grad = grad.real
                 grad += self.alpha_mat_ref_sites[self.active_elements]/2 * weights
@@ -705,7 +718,7 @@ class QGPSGenLinMod(QGPSLearningExp):
             hess_a = -np.dot(K.T * b_1, K)
             hess_b = np.dot(K.T * b_2, K.conj())
 
-            hessian = beta * _mpi_sum(hess_a + hess_b)
+            hessian = self.beta * _mpi_sum(hess_a + hess_b)
 
             if self.complex_expand and self.epsilon.dtype==complex:
                 hessian = (hessian + np.diag(self.alpha_mat_ref_sites[self.active_elements]/2)).real
@@ -720,6 +733,7 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         self.KtK_alpha = get_hessian(weights)
         self.grad = get_grad(weights)
+        get_loss(weights)
 
         self.cholesky = False
         self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
@@ -756,29 +770,23 @@ class QGPSGenLinMod(QGPSLearningExp):
         if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
-    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, max_alpha_iterations=None, rvm=False, minimize_fun=None):
+    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None):
         self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun)
 
-        if opt_alpha:
-            self.opt_alpha(max_iterations=max_alpha_iterations, rvm=rvm)
+        if opt_alpha or opt_beta:
+            self.opt_alpha_beta(opt_alpha=opt_alpha, opt_beta=opt_beta, max_iterations=max_alpha_beta_iterations, rvm=rvm)
 
         if not self.precomputed_features:
             self.update_epsilon_with_weights()
 
+        self.noise_tilde = 1/self.beta
+
     # TODO: fix prefactors, double check, etc.
     def log_marg_lik(self):
-        N_data = _mpi_sum(len(self.exp_amps))
-
-        if self.noise_tilde != 0.:
-            beta = 1/self.noise_tilde
-        else:
-            beta = 1.
-
         if self.epsilon.dtype==complex:
-            log_lik = (np.log(beta) - np.log(np.pi)) * N_data
+            log_lik = (np.log(self.beta) - np.log(np.pi)) * self.N_data
         else:
-            log_lik = (np.log(beta) - np.log(2*np.pi)) * N_data
-
+            log_lik = (np.log(self.beta) - np.log(2*np.pi)) * self.N_data
 
         if self.cholesky:
             if self.complex_expand and self.epsilon.dtype==complex:
@@ -805,7 +813,7 @@ class QGPSGenLinMod(QGPSLearningExp):
         weights = self.weights[self.active_elements]
 
         pred = np.exp(K.dot(weights))
-        loss = beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+        loss = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
 
         if self.complex_expand and self.epsilon.dtype==complex:
             loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
