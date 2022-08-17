@@ -745,11 +745,19 @@ class QGPSGenLinMod(QGPSLearningExp):
                     try:
                         L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
                         np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        np.copyto(weights, weights - sp.linalg.cho_solve((L, True), self.grad))
+                        """ This helps with the stability.
+                        If the Laplace approximation is bad, updating the weights accordingly can give quit bad results
+                        so it's better to be a little bit more cautious with the updates."""
+                        if minimize_fun is None:
+                            np.copyto(weights, weights - sp.linalg.cho_solve((L, True), self.grad))
                         self.cholesky = True
                     except:
                         np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
-                        np.copyto(weights, weights - self.Sinv.dot(self.grad))
+                        """ This helps with the stability.
+                        If the Laplace approximation is bad, updating the weights accordingly can give quit bad results
+                        so it's better to be a little bit more cautious with the updates."""
+                        if minimize_fun is None:
+                            np.copyto(weights, weights - self.Sinv.dot(self.grad))
 
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(weights, root=0)
