@@ -425,6 +425,8 @@ class QGPSLearningExp(QGPSLearning):
                         diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
                     else:
                         diag_Sinv = np.diag(self.Sinv).real
+                        if _rank == 0:
+                            print("Warning, update not applied (Cholesky decomposition failed).")
 
                     if self.complex_expand and self.epsilon.dtype==complex:
                         diag_Sinv = diag_Sinv * 0.5
@@ -439,11 +441,13 @@ class QGPSLearningExp(QGPSLearning):
                         else:
                             alpha.fill(((np.sum(gamma)/(self.weights.conj().dot(self.weights))).real))
 
-                        if np.any(alpha < 0.):
-                            print("Warning! clipping alpha < 0")
+                        if self.cholesky:
+                            if np.any(alpha < 0.):
+                                print("Warning! clipping alpha < 0")
                         self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
                     if opt_beta:
-                        self.beta = (self.N_data - np.sum(gamma))/(self.neg_log_likelihood/self.beta)
+                        if self.cholesky:
+                            self.beta = (self.N_data - np.sum(gamma))/(self.neg_log_likelihood/self.beta)
 
                     j += 1
                     convergence_loss = 0.
@@ -654,7 +658,7 @@ class QGPSLearningExp(QGPSLearning):
         return
 
 class QGPSGenLinMod(QGPSLearningExp):
-    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None):
+    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None):
         self.ref_sites = ref_sites
         self.weights = None
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
@@ -664,9 +668,9 @@ class QGPSGenLinMod(QGPSLearningExp):
             self.beta = 1/self.noise_tilde
         else:
             self.beta = 1.
-        self.setup_fit_alpha_dep(minimize_fun=minimize_fun)
+        self.setup_fit_alpha_dep(minimize_fun=minimize_fun, linesearch_fun=linesearch_fun)
 
-    def setup_fit_alpha_dep(self, minimize_fun=None):
+    def setup_fit_alpha_dep(self, minimize_fun=None, linesearch_fun=None):
         self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
 
         if self.precomputed_features:
@@ -739,29 +743,38 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         self.cholesky = False
         self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
+
+        update_directions = np.zeros_like(weights)
         if self.active_elements.any():
             if _rank == 0:
                 with threadpool_limits(limits=self.max_threads, user_api="blas"):
                     try:
                         L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
                         np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        """ This helps with the stability.
-                        If the Laplace approximation is bad, updating the weights accordingly can give quit bad results
-                        so it's better to be a little bit more cautious with the updates."""
-                        if minimize_fun is None:
-                            np.copyto(weights, weights - sp.linalg.cho_solve((L, True), self.grad))
+                        update_directions = -sp.linalg.cho_solve((L, True), self.grad)
                         self.cholesky = True
                     except:
                         np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
-                        """ This helps with the stability.
-                        If the Laplace approximation is bad, updating the weights accordingly can give quit bad results
-                        so it's better to be a little bit more cautious with the updates."""
-                        if minimize_fun is None:
-                            np.copyto(weights, weights - self.Sinv.dot(self.grad))
+                        update_directions = -self.Sinv.dot(self.grad)
 
             _MPI_comm.Bcast(self.Sinv, root=0)
-            _MPI_comm.Bcast(weights, root=0)
+            _MPI_comm.Bcast(update_directions, root=0)
             self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
+
+            if linesearch_fun is not None:
+                result = linesearch_fun(get_loss, get_grad, weights, update_directions)
+                gamma = result[0]
+                if gamma is None:
+                    if _rank == 0:
+                        print("linesearch not converged, resetting step", self.cholesky)
+                    gamma = 0.
+            else:
+                gamma = 1.
+            if self.cholesky:
+                np.copyto(weights, weights + gamma * update_directions)
+            else:
+                if _rank == 0:
+                    print("Cholesky fail")
 
             # This bit is just to emphasize that self.Sinv is not the inverse of sigma but its Cholesky decomposition if self.cholesky==True
             if self.cholesky:
@@ -780,8 +793,8 @@ class QGPSGenLinMod(QGPSLearningExp):
         if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
-    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None):
-        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun)
+    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None, linesearch_fun=None):
+        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun, linesearch_fun=linesearch_fun)
 
         if opt_alpha or opt_beta:
             self.opt_alpha_beta(opt_alpha=opt_alpha, opt_beta=opt_beta, max_iterations=max_alpha_beta_iterations, rvm=rvm)
