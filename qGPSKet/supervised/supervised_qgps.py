@@ -100,13 +100,13 @@ class QGPSLearning():
     @staticmethod
     @njit()
     def kernel_mat_inner(site_prod, confs, K, ref_sites):
-        K = K.reshape(site_prod.shape[0], site_prod.shape[1], -1)
+        K = K.reshape(site_prod.shape[0], site_prod.shape[1], -1, site_prod.shape[2])
         K.fill(0.0)
         for i in range(site_prod.shape[0]):
             for j in range(ref_sites.shape[0]):
                 for k in range(site_prod.shape[2]):
-                    K[i, j, confs[i, ref_sites[j], k]] += site_prod[i, j, k]
-        return K.reshape(site_prod.shape[0], -1)
+                    K[i, j, confs[i, ref_sites[j], k], k] += site_prod[i, j, k]
+        return K.reshape(site_prod.shape[0], -1, site_prod.shape[2])
 
     @staticmethod
     @njit()
@@ -172,14 +172,16 @@ class QGPSLearning():
             if recompute_site_prod:
                 self.confs = confs
                 self.compute_site_prod()
-                self.K = None
+                self.K_per_sym = None
 
-            if self.K is None:
-                self.K = np.zeros((confs.shape[0], self.epsilon.shape[1] * self.epsilon.shape[0]), dtype=self.epsilon.dtype)
+            if self.K_per_sym is None:
+                self.K_per_sym = np.zeros((confs.shape[0], self.epsilon.shape[1] * self.epsilon.shape[0], self.site_prod.shape[-1]), dtype=self.epsilon.dtype)
                 update_K = True
 
             if update_K:
-                self.K = self.kernel_mat_inner(self.site_prod, self.confs, self.K, self.ref_sites)
+                self.K_per_sym = self.kernel_mat_inner(self.site_prod, self.confs, self.K_per_sym, self.ref_sites)
+
+        self.K = np.sum(self.K_per_sym, axis=-1)
 
         return self.K
 
@@ -803,6 +805,187 @@ class QGPSGenLinMod(QGPSLearningExp):
             self.update_epsilon_with_weights()
 
         self.noise_tilde = 1/self.beta
+
+    # TODO: fix prefactors, double check, etc.
+    def log_marg_lik(self):
+        if self.epsilon.dtype==complex:
+            log_lik = (np.log(self.beta) - np.log(np.pi)) * self.N_data
+        else:
+            log_lik = (np.log(self.beta) - np.log(2*np.pi)) * self.N_data
+
+        if self.cholesky:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.sum(np.log(0.5 * abs(np.diag(self.Sinv_L))**2))
+            else:
+                log_lik += 2 * np.sum(np.log(abs(np.diag(self.Sinv_L))))
+        else:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
+            else:
+                log_lik += np.linalg.slogdet(self.Sinv)[1]
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            log_lik += 0.5 * np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
+        else:
+            log_lik += np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            K = np.hstack((self.K, 1.j * self.K))
+        else:
+            K = self.K
+
+        K = K[:, self.active_elements]
+        weights = self.weights[self.active_elements]
+
+        pred = np.exp(K.dot(weights))
+        loss = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
+        else:
+            loss += np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
+
+        log_lik -= loss
+
+        if self.epsilon.dtype==float:
+            log_lik *= 0.5
+
+        return log_lik.real
+
+
+class QGPSGenLinModProjSym(QGPSGenLinMod):
+    def predict(self, confset):
+        assert(confset.size > 0)
+        self.set_up_prediction(confset)
+        return np.sum(np.exp(np.einsum("ijk,j->ik", self.K_per_sym, ((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten()))), axis=-1)
+
+    def setup_fit_alpha_dep(self, minimize_fun=None, linesearch_fun=None):
+        self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
+
+        if self.precomputed_features:
+            assert self.weights is not None
+            weights = self.weights
+        else:
+            if self.weights is None:
+                weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+                if self.complex_expand and self.epsilon.dtype==complex:
+                    weights = np.concatenate((weights.real, weights.imag))
+            else:
+                weights = self.weights
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            K = np.hstack((self.K_per_sym, 1.j * self.K_per_sym))
+        else:
+            K = self.K_per_sym
+
+        self.valid_kern = _mpi_sum(np.sum(abs(K), axis=(0,-1))) > self.kern_cutoff
+        self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
+
+        K = K[:, self.active_elements, :]
+        weights = weights[self.active_elements]
+
+        def get_loss(weights):
+            pred = np.sum(np.exp(np.einsum("ijk,j->ik", K, weights)), axis=-1)
+            self.neg_log_likelihood = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+            if self.complex_expand and self.epsilon.dtype==complex:
+                loss = self.neg_log_likelihood + np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
+            else:
+                loss = self.neg_log_likelihood + np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
+            return loss/2
+
+        def get_grad(weights):
+            per_sym_pred = np.exp(np.einsum("ijk,j->ik", K, weights))
+            pred = np.sum(per_sym_pred, axis=-1)
+            pred_der = np.einsum("ijk,ik->ij", K, per_sym_pred)
+            g = (self.exp_amps - pred).conj()
+            grad = -np.einsum("ij,i->j", pred_der, g)
+            grad = self.beta * _mpi_sum(grad)
+            if self.complex_expand and self.epsilon.dtype==complex:
+                grad = grad.real
+                grad += self.alpha_mat_ref_sites[self.active_elements]/2 * weights
+            else:
+                grad += self.alpha_mat_ref_sites[self.active_elements] * weights
+            return grad
+
+        def get_hessian(weights):
+            per_sym_pred = np.exp(np.einsum("ijk,j->ik", K, weights))
+            pred = np.sum(per_sym_pred, axis=-1)
+
+            b_1 = per_sym_pred * np.expand_dims((self.exp_amps - pred).conj(), -1)
+            hess_a = -np.einsum("ijk,ik,ilk->jl", K, b_1, K)
+
+            b_2 = np.einsum("ij,ik->ijk", per_sym_pred, per_sym_pred.conj())
+            tmp = np.einsum("ikm,ilm->ikl", b_2, K.conj(), optimize=True)
+            hess_b = np.einsum("ijk,ikl->jl", K, tmp, optimize=True)
+
+            hessian = self.beta * _mpi_sum(hess_a + hess_b)
+
+            if self.complex_expand and self.epsilon.dtype==complex:
+                hessian = (hessian + np.diag(self.alpha_mat_ref_sites[self.active_elements]/2)).real
+            else:
+                hessian = hessian + np.diag(self.alpha_mat_ref_sites[self.active_elements])
+
+            return hessian
+
+        if minimize_fun is not None:
+            min_result = minimize_fun(get_loss, weights, jac=get_grad, hess=get_hessian)
+            weights = min_result.x
+
+        self.KtK_alpha = get_hessian(weights)
+        self.grad = get_grad(weights)
+        get_loss(weights)
+
+        self.cholesky = False
+        self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
+
+        update_directions = np.zeros_like(weights)
+        if self.active_elements.any():
+            if _rank == 0:
+                with threadpool_limits(limits=self.max_threads, user_api="blas"):
+                    try:
+                        L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
+                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
+                        update_directions = -sp.linalg.cho_solve((L, True), self.grad)
+                        self.cholesky = True
+                    except:
+                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
+                        update_directions = -self.Sinv.dot(self.grad)
+
+            _MPI_comm.Bcast(self.Sinv, root=0)
+            _MPI_comm.Bcast(update_directions, root=0)
+            self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
+
+            if linesearch_fun is not None:
+                result = linesearch_fun(get_loss, get_grad, weights, update_directions)
+                gamma = result[0]
+                if gamma is None:
+                    if _rank == 0:
+                        print("linesearch not converged, resetting step", self.cholesky)
+                    gamma = 0.
+            else:
+                gamma = 1.
+            if self.cholesky:
+                np.copyto(weights, weights + gamma * update_directions)
+            else:
+                if _rank == 0:
+                    print("Cholesky fail")
+
+            # This bit is just to emphasize that self.Sinv is not the inverse of sigma but its Cholesky decomposition if self.cholesky==True
+            if self.cholesky:
+                self.Sinv_L = self.Sinv
+                self.Sinv = None
+
+        if self.weights is None:
+            if not self.complex_expand and self.epsilon.dtype==complex:
+                self.weights = np.zeros(self.alpha_mat_ref_sites.shape[0], dtype=complex)
+            else:
+                self.weights = np.zeros(self.alpha_mat_ref_sites.shape[0], dtype=float)
+
+        else:
+            self.weights.fill(0.0)
+
+        if self.active_elements.any() > 0:
+            self.weights[self.active_elements] = weights
 
     # TODO: fix prefactors, double check, etc.
     def log_marg_lik(self):
