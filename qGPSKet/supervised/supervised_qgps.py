@@ -660,6 +660,12 @@ class QGPSLearningExp(QGPSLearning):
         return
 
 class QGPSGenLinMod(QGPSLearningExp):
+    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, K=None):
+        if epsilon.dtype==complex:
+            complex_expand = True
+        else:
+            complex_expand = False
+        super().__init__(epsilon, init_alpha=init_alpha, init_noise_tilde = init_noise_tilde, complex_expand=complex_expand, K=K)
     def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None):
         self.ref_sites = ref_sites
         self.weights = None
@@ -907,6 +913,7 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
                 grad += self.alpha_mat_ref_sites[self.active_elements] * weights
             return grad
 
+        # TODO: This is quite slow atm, spped this up!
         def get_hessian(weights):
             per_sym_pred = np.exp(np.einsum("ijk,j->ik", K, weights))
             pred = np.sum(per_sym_pred, axis=-1)
