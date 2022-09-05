@@ -666,12 +666,16 @@ class QGPSGenLinMod(QGPSLearningExp):
         else:
             complex_expand = False
         super().__init__(epsilon, init_alpha=init_alpha, init_noise_tilde = init_noise_tilde, complex_expand=complex_expand, K=K)
-    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None):
+    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None, weightings=None):
         self.ref_sites = ref_sites
         self.weights = None
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
         self.set_kernel_mat(confset)
-        self.N_data = _mpi_sum(len(self.exp_amps))
+        if weightings is None:
+            self.weightings = np.ones(len(self.exp_amps))
+        else:
+            self.weightings = weightings
+        self.N_data = _mpi_sum(np.sum(self.weightings))
         if self.noise_tilde != 0.:
             self.beta = 1/self.noise_tilde
         else:
@@ -705,7 +709,7 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         def get_loss(weights):
             pred = np.exp(K.dot(weights))
-            self.neg_log_likelihood = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+            self.neg_log_likelihood = self.beta * _mpi_sum(np.sum(self.weightings * abs(self.exp_amps - pred)**2))
             if self.complex_expand and self.epsilon.dtype==complex:
                 loss = self.neg_log_likelihood + np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
             else:
@@ -714,7 +718,7 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         def get_grad(weights):
             pred = np.exp(K.dot(weights))
-            g = pred * (self.exp_amps - pred).conj()
+            g = self.weightings * pred * (self.exp_amps - pred).conj()
             grad = - K.T.dot(g)
             grad = self.beta * _mpi_sum(grad)
             if self.complex_expand and self.epsilon.dtype==complex:
@@ -726,8 +730,8 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         def get_hessian(weights):
             pred = np.exp(K.dot(weights))
-            b_1 = pred * (self.exp_amps - pred).conj()
-            b_2 = pred * pred.conj()
+            b_1 = self.weightings * pred * (self.exp_amps - pred).conj()
+            b_2 = self.weightings * pred * pred.conj()
 
             hess_a = -np.dot(K.T * b_1, K)
             hess_b = np.dot(K.T * b_2, K.conj())
@@ -801,8 +805,8 @@ class QGPSGenLinMod(QGPSLearningExp):
         if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
-    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None, linesearch_fun=None):
-        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun, linesearch_fun=linesearch_fun)
+    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None, linesearch_fun=None, weightings=None):
+        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun, linesearch_fun=linesearch_fun, weightings=weightings)
 
         if opt_alpha or opt_beta:
             self.opt_alpha_beta(opt_alpha=opt_alpha, opt_beta=opt_beta, max_iterations=max_alpha_beta_iterations, rvm=rvm)
@@ -844,7 +848,7 @@ class QGPSGenLinMod(QGPSLearningExp):
         weights = self.weights[self.active_elements]
 
         pred = np.exp(K.dot(weights))
-        loss = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+        loss = self.beta * _mpi_sum(np.sum(self.weightings * abs(self.exp_amps - pred)**2))
 
         if self.complex_expand and self.epsilon.dtype==complex:
             loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
@@ -892,7 +896,7 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
 
         def get_loss(weights):
             pred = np.sum(np.exp(np.einsum("ijk,j->ik", K, weights)), axis=-1)
-            self.neg_log_likelihood = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+            self.neg_log_likelihood = self.beta * _mpi_sum(np.sum(self.weightings * abs(self.exp_amps - pred)**2))
             if self.complex_expand and self.epsilon.dtype==complex:
                 loss = self.neg_log_likelihood + np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
             else:
@@ -903,7 +907,7 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
             per_sym_pred = np.exp(np.einsum("ijk,j->ik", K, weights))
             pred = np.sum(per_sym_pred, axis=-1)
             pred_der = np.einsum("ijk,ik->ij", K, per_sym_pred)
-            g = (self.exp_amps - pred).conj()
+            g = self.weightings * (self.exp_amps - pred).conj()
             grad = -np.einsum("ij,i->j", pred_der, g)
             grad = self.beta * _mpi_sum(grad)
             if self.complex_expand and self.epsilon.dtype==complex:
@@ -918,10 +922,10 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
             per_sym_pred = np.exp(np.einsum("ijk,j->ik", K, weights))
             pred = np.sum(per_sym_pred, axis=-1)
 
-            b_1 = per_sym_pred * np.expand_dims((self.exp_amps - pred).conj(), -1)
+            b_1 = per_sym_pred * np.expand_dims(self.weightings * (self.exp_amps - pred).conj(), -1)
             hess_a = -np.einsum("ijk,ik,ilk->jl", K, b_1, K)
 
-            b_2 = np.einsum("ij,ik->ijk", per_sym_pred, per_sym_pred.conj())
+            b_2 = np.einsum("i,ij,ik->ijk", self.weightings, per_sym_pred, per_sym_pred.conj())
             tmp = np.einsum("ikm,ilm->ikl", b_2, K.conj(), optimize=True)
             hess_b = np.einsum("ijk,ikl->jl", K, tmp, optimize=True)
 
@@ -1026,7 +1030,7 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
         weights = self.weights[self.active_elements]
 
         pred = np.exp(K.dot(weights))
-        loss = self.beta * _mpi_sum(np.sum(abs(self.exp_amps - pred)**2))
+        loss = self.beta * _mpi_sum(np.sum(self.weightings * abs(self.exp_amps - pred)**2))
 
         if self.complex_expand and self.epsilon.dtype==complex:
             loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
