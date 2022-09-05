@@ -326,7 +326,7 @@ class QGPSLearningExp(QGPSLearning):
         else:
             self.fit_data = np.log(self.exp_amps)
         self.set_kernel_mat(confset)
-        self.fit_data -= prior_mean * _mpi_sum(np.sum(self.K, axis=1))
+        self.fit_data -= prior_mean * np.sum(self.K, axis=1)
         self.setup_fit_noise_dep(weightings=weightings)
 
     def log_marg_lik(self):
