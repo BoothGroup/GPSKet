@@ -446,7 +446,7 @@ class QGPSLearningExp(QGPSLearning):
                         if self.cholesky:
                             if np.any(alpha < 0.):
                                 print("Warning! clipping alpha < 0")
-                        self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
+                            self.alpha_mat_ref_sites = np.clip(alpha, 0., self.alpha_cutoff)
                     if opt_beta:
                         if self.cholesky:
                             self.beta = (self.N_data - np.sum(gamma))/(self.neg_log_likelihood/self.beta)
@@ -808,8 +808,11 @@ class QGPSGenLinMod(QGPSLearningExp):
     def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None, linesearch_fun=None, weightings=None):
         self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun, linesearch_fun=linesearch_fun, weightings=weightings)
 
-        if opt_alpha or opt_beta:
+        if (opt_alpha or opt_beta) and self.cholesky:
             self.opt_alpha_beta(opt_alpha=opt_alpha, opt_beta=opt_beta, max_iterations=max_alpha_beta_iterations, rvm=rvm)
+        if not self.cholesky:
+            if _rank == 0:
+                print("Warning, update not applied (Cholesky decomposition failed).")
 
         if not self.precomputed_features:
             self.update_epsilon_with_weights()
