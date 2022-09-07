@@ -666,7 +666,7 @@ class QGPSGenLinMod(QGPSLearningExp):
         else:
             complex_expand = False
         super().__init__(epsilon, init_alpha=init_alpha, init_noise_tilde = init_noise_tilde, complex_expand=complex_expand, K=K)
-    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None, weightings=None):
+    def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None, weightings=None, log_fit_init=False):
         self.ref_sites = ref_sites
         self.weights = None
         self.exp_amps = target_amplitudes.astype(self.epsilon.dtype)
@@ -680,9 +680,9 @@ class QGPSGenLinMod(QGPSLearningExp):
             self.beta = 1/self.noise_tilde
         else:
             self.beta = 1.
-        self.setup_fit_alpha_dep(minimize_fun=minimize_fun, linesearch_fun=linesearch_fun)
+        self.setup_fit_alpha_dep(minimize_fun=minimize_fun, linesearch_fun=linesearch_fun, log_fit_init=log_fit_init)
 
-    def setup_fit_alpha_dep(self, minimize_fun=None, linesearch_fun=None):
+    def setup_fit_alpha_dep(self, minimize_fun=None, linesearch_fun=None, log_fit_init=False):
         self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
 
         if self.precomputed_features:
@@ -696,6 +696,7 @@ class QGPSGenLinMod(QGPSLearningExp):
             else:
                 weights = self.weights
 
+
         if self.complex_expand and self.epsilon.dtype==complex:
             K = np.hstack((self.K, 1.j * self.K))
         else:
@@ -703,6 +704,31 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         self.valid_kern = _mpi_sum(np.sum(abs(K), axis=0)) > self.kern_cutoff
         self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
+
+        if log_fit_init:
+            if self.noise_tilde == 0.:
+                S_diag = np.ones(len(self.exp_amps))
+            else:
+                S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
+
+            S_diag *= self.weightings
+
+            KtK = _mpi_sum(np.dot(self.K.conj().T, np.einsum("i,ij->ij", S_diag, self.K)))
+
+            y = _mpi_sum(self.K.conj().T.dot(S_diag * np.log(self.exp_amps.astype(self.epsilon.dtype))))
+
+            if self.complex_expand and self.epsilon.dtype==complex:
+                KtK = np.block([[KtK.real, -KtK.imag],[KtK.imag, KtK.real]])
+                y = np.concatenate((y.real, y.imag))
+                KtK_alpha = KtK + np.diag(self.alpha_mat_ref_sites/2)
+            else:
+                KtK_alpha = KtK + np.diag(self.alpha_mat_ref_sites)
+
+            if _rank == 0:
+                with threadpool_limits(limits=self.max_threads, user_api="blas"):
+                    weights = np.linalg.lstsq(KtK_alpha, y, rcond=None)[0]
+            _MPI_comm.Bcast(weights, root=0)
+
 
         K = K[:, self.active_elements]
         weights = weights[self.active_elements]
@@ -805,8 +831,8 @@ class QGPSGenLinMod(QGPSLearningExp):
         if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
 
-    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None, linesearch_fun=None, weightings=None):
-        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun, linesearch_fun=linesearch_fun, weightings=weightings)
+    def fit_step(self, confset, target_amplitudes, ref_sites, opt_alpha=True, opt_beta=True, max_alpha_beta_iterations=None, rvm=False, minimize_fun=None, linesearch_fun=None, weightings=None, log_fit_init=False):
+        self.setup_fit(confset, target_amplitudes, ref_sites, minimize_fun=minimize_fun, linesearch_fun=linesearch_fun, weightings=weightings, log_fit_init=log_fit_init)
 
         if (opt_alpha or opt_beta) and self.cholesky:
             self.opt_alpha_beta(opt_alpha=opt_alpha, opt_beta=opt_beta, max_iterations=max_alpha_beta_iterations, rvm=rvm)
