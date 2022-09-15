@@ -924,7 +924,7 @@ class QGPSGenLinMod(QGPSLearningExp):
         if self.epsilon.dtype==float:
             log_lik_der *= 0.5
 
-        return log_lik.real
+        return log_lik_der.real
 
 
 
