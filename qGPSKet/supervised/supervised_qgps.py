@@ -891,6 +891,42 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         return log_lik.real
 
+    # TODO: test this, check prefactors etc.
+    def log_marg_lik_beta_der(self):
+        log_lik_der = self.N_data/self.beta
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            K = np.hstack((self.K, 1.j * self.K))
+        else:
+            K = self.K
+
+        K = K[:, self.active_elements]
+        weights = self.weights[self.active_elements]
+
+        pred = np.exp(K.dot(weights))
+
+        if self.cholesky:
+            diag_Sinv = np.sum(abs(self.Sinv_L) ** 2, 0)
+        else:
+            diag_Sinv = np.diag(self.Sinv).real
+            if _rank == 0:
+                print("Warning, update not applied (Cholesky decomposition failed).")
+
+        if self.complex_expand and self.epsilon.dtype==complex:
+            diag_Sinv = diag_Sinv * 0.5
+
+        gamma = (1 - (self.alpha_mat_ref_sites[self.active_elements])*diag_Sinv)
+
+        log_lik_der -= np.sum(gamma)/self.beta
+
+        log_lik_der -= _mpi_sum(np.sum(self.weightings * abs(self.exp_amps - pred)**2))
+
+        if self.epsilon.dtype==float:
+            log_lik_der *= 0.5
+
+        return log_lik_der.real
+
+
 
 class QGPSGenLinModProjSym(QGPSGenLinMod):
     def predict(self, confset):
