@@ -34,6 +34,7 @@ def occupancies_to_electrons(x : Array, n_elec : Tuple[int, int]) -> Array:
         y : input configurations transformed into 1st quantization representation (B, N_up+N_down)
     """
     batch_size = x.shape[0]
+    x = jnp.asarray(x, dtype=jnp.int32)
     _, y_up = jnp.nonzero(x&1, size=batch_size*n_elec[0])
     _, y_down = jnp.nonzero((x&2)/2, size=batch_size*n_elec[1])
     y_up = jnp.reshape(y_up, (batch_size, -1))
