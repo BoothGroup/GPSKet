@@ -297,7 +297,10 @@ class QGPSLearning():
         return _MPI_comm.allreduce(np.sum(errors))
 
     def update_epsilon_with_weights(self, prior_mean=0.):
-        old_weights = np.concatenate(((self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()-prior_mean, self.bias))
+        old_weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()-prior_mean
+
+        if self.include_bias:
+            old_weights = np.concatenate((old_weights, self.bias))
 
         if self.complex_expand and self.epsilon.dtype==complex:
             old_weights = np.concatenate((old_weights.real, old_weights.imag))
