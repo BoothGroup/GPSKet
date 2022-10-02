@@ -1,5 +1,7 @@
 import jax.numpy as jnp
+import numpy as np
 from flax import linen as nn
+from netket.utils import HashableArray
 from netket.utils.types import Array, Callable, DType, NNInitFunc
 from .slater import Slater
 from ..hilbert.discrete_fermion import FermionicDiscreteHilbert
@@ -30,6 +32,8 @@ class ASymmqGPS(nn.Module):
     """Type of the variational parameters"""
     init_fun : NNInitFunc = orthogonal()
     """Initializer for the variational parameters"""
+    coeffs : HashableArray = HashableArray(np.ones(1))
+    """Coefficients of the terms in the linear combination of Slater determinants"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
     symmetrization: str = 'kernel'
@@ -43,20 +47,21 @@ class ASymmqGPS(nn.Module):
 
     @nn.compact
     def __call__(self, x: Array) -> Array:
+        assert self.n_determinants == self.coeffs.shape[0]
         if len(x.shape) == 1:
             x = jnp.expand_dims(x, 0)
         x = jnp.asarray(x, jnp.int32) # (B, L)
 
         if self.symmetrization == 'kernel':
             def out_transformation(y):
-                y = jnp.exp(y) # (B, M, S, T)
+                y = jnp.asarray(self.coeffs)*jnp.exp(y) # (B, M, S, T)
                 y = jnp.sum(y, axis=1) # (B, S, T)
                 y = jnp.sinh(jnp.sum(y, axis=(-2, -1))) # (B,)
                 y = jnp.log(y)
                 return y
         elif self.symmetrization == 'projective':
             def out_transformation(y):
-                y = jnp.exp(y) # (B, M, S, T)
+                y = jnp.asarray(self.coeffs)*jnp.exp(y) # (B, M, S, T)
                 y = jnp.sinh(jnp.sum(y, axis=1)) # (B, S, T)
                 y = jnp.sum(y, axis=(-2, -1)) # (B,)
                 y = jnp.log(y)
