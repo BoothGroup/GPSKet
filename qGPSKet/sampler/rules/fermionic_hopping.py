@@ -33,7 +33,10 @@ def transition_function(key, sample, hop_probability, transition_probs=None, ret
 
     keys = jax.random.split(key, num=sample.shape[0])
 
+    dtype = sample.dtype
+    sample = jnp.asarray(sample, jnp.uint8)
     updated_sample, start_sites, target_sites = jax.vmap(apply_electron_hop, in_axes=(0, 0), out_axes=(0, 0, 0))(sample, keys)
+    updated_sample = jnp.array(updated_sample, dtype)
 
     if return_updates:
         update_sites = jnp.stack((start_sites, target_sites), axis=-1)
