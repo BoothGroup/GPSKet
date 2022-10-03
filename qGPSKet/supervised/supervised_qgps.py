@@ -20,7 +20,7 @@ from mpi4py import MPI
 from threadpoolctl import threadpool_limits
 
 class QGPSLearning():
-    def __init__(self, epsilon, init_alpha=1.0, complex_expand=False, K=None):
+    def __init__(self, epsilon, init_alpha=1.0, complex_expand=False, K=None, include_bias=False):
         self.K = K
         if self.K is not None:
             self.precomputed_features = True
@@ -40,18 +40,23 @@ class QGPSLearning():
         if self.precomputed_features:
             if self.complex_expand and self.epsilon.dtype==complex:
                 self.alpha_mat = np.ones(self.K.shape[0]*2)*init_alpha
+                self.alpha_bias = np.ones(2)*init_alpha
             else:
                 self.alpha_mat = np.ones(self.K.shape[0])*init_alpha
+                self.alpha_bias = np.ones(1)*init_alpha
         else:
             if self.complex_expand and self.epsilon.dtype==complex:
                 self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*2*self.epsilon.shape[1]))*init_alpha
+                self.alpha_bias = np.ones(2)*init_alpha
             else:
                 self.alpha_mat = np.ones((self.epsilon.shape[-1], self.epsilon.shape[0]*self.epsilon.shape[1]))*init_alpha
-
+                self.alpha_bias = np.ones(1)*init_alpha
+        self.include_bias = include_bias
         self.alpha_cutoff = 1.e10
         self.kern_cutoff = 1.e-10
         self.alpha_convergence_tol = 1.e-15
         self.max_threads = 1
+        self.bias = np.zeros(1, dtype=epsilon.dtype)
 
     @property
     def epsilon(self):
@@ -86,16 +91,29 @@ class QGPSLearning():
     @property
     def alpha_mat_ref_sites(self):
         if self.precomputed_features:
-            return self.alpha_mat
+            full_alpha = self.alpha_mat
         else:
-            return self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids]
+            full_alpha = self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids]
+        if self.include_bias:
+            full_alpha = np.concatenate((full_alpha, self.alpha_bias))
+        return full_alpha
 
     @alpha_mat_ref_sites.setter
     def alpha_mat_ref_sites(self, alpha):
-        if self.precomputed_features:
-            self.alpha_mat = alpha
+        if self.include_bias:
+            if self.complex_expand and self.epsilon.dtype==complex:
+                alpha_bias = alpha[-2:]
+                alpha_epsilon = alpha[:-2]
+            else:
+                alpha_bias = alpha[-1:]
+                alpha_epsilon = alpha[:-1]
+            self.alpha_bias = alpha_bias
         else:
-            self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids] = alpha
+            alpha_epsilon = alpha
+        if self.precomputed_features:
+            self.alpha_mat = alpha_epsilon
+        else:
+            self.alpha_mat[self._ref_sites_incr_dim, self.feature_ids] = alpha_epsilon
 
     @staticmethod
     @njit()
@@ -182,6 +200,9 @@ class QGPSLearning():
                 self.K_per_sym = self.kernel_mat_inner(self.site_prod, self.confs, self.K_per_sym, self.ref_sites)
 
         self.K = np.sum(self.K_per_sym, axis=-1)
+
+        if self.include_bias:
+            self.K = np.concatenate((self.K, np.ones((self.K.shape[0],1))), axis=1)
 
         return self.K
 
@@ -278,26 +299,43 @@ class QGPSLearning():
     def update_epsilon_with_weights(self, prior_mean=0.):
         old_weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()-prior_mean
 
+        if self.include_bias:
+            old_weights = np.concatenate((old_weights, self.bias))
+
         if self.complex_expand and self.epsilon.dtype==complex:
-            old_weights = np.concatenate((old_weights.imag, old_weights.real))-prior_mean
+            old_weights = np.concatenate((old_weights.real, old_weights.imag))
 
         weights = np.where(self.valid_kern, self.weights, old_weights)
-        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:self.epsilon.shape[0]*self.epsilon.shape[1]].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
+
+        no_epsilon_weights = self.epsilon.shape[0]*self.epsilon.shape[1]
+
+        if self.include_bias:
+            self.bias = np.array(self.weights[no_epsilon_weights], dtype=self.bias.dtype).reshape(1)
+            if self.complex_expand and self.epsilon.dtype==complex:
+                self.bias += 1.j*self.weights[-1]
+
+        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:no_epsilon_weights].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
 
         if self.complex_expand and self.epsilon.dtype==complex:
-            self.epsilon[:, self.support_dim_range_ids, self.ref_sites] += 1.j * weights[self.epsilon.shape[0]*self.epsilon.shape[1]:].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
+            if self.include_bias:
+                self.epsilon[:, self.support_dim_range_ids, self.ref_sites] += 1.j * weights[(no_epsilon_weights+1):-1].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
+            else:
+                self.epsilon[:, self.support_dim_range_ids, self.ref_sites] += 1.j * weights[no_epsilon_weights:].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
 
 
 class QGPSLearningExp(QGPSLearning):
-    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, complex_expand=False, K=None):
-        super().__init__(epsilon, init_alpha=init_alpha, complex_expand=complex_expand, K=K)
+    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, complex_expand=False, K=None, include_bias=False):
+        super().__init__(epsilon, init_alpha=init_alpha, complex_expand=complex_expand, K=K, include_bias=include_bias)
 
         self.noise_tilde = init_noise_tilde
 
     def predict(self, confset):
         assert(confset.size > 0)
         self.set_up_prediction(confset)
-        return np.exp(self.K.dot((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten()))
+        if self.include_bias:
+            return np.exp(self.K[:,:-1].dot((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten())+self.bias)
+        else:
+            return np.exp(self.K.dot((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten()))
 
     def setup_fit_noise_dep(self, weightings=None):
         if self.noise_tilde == 0.:
@@ -326,7 +364,10 @@ class QGPSLearningExp(QGPSLearning):
         else:
             self.fit_data = np.log(self.exp_amps)
         self.set_kernel_mat(confset)
-        self.fit_data -= prior_mean * np.sum(self.K, axis=1)
+        if self.include_bias:
+            self.fit_data -= prior_mean * np.sum(self.K[:,:-1], axis=1)
+        else:
+            self.fit_data -= prior_mean * np.sum(self.K, axis=1)
         self.setup_fit_noise_dep(weightings=weightings)
 
     def log_marg_lik(self):
@@ -660,12 +701,12 @@ class QGPSLearningExp(QGPSLearning):
         return
 
 class QGPSGenLinMod(QGPSLearningExp):
-    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, K=None):
+    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, K=None, include_bias=False):
         if epsilon.dtype==complex:
             complex_expand = True
         else:
             complex_expand = False
-        super().__init__(epsilon, init_alpha=init_alpha, init_noise_tilde = init_noise_tilde, complex_expand=complex_expand, K=K)
+        super().__init__(epsilon, init_alpha=init_alpha, init_noise_tilde = init_noise_tilde, complex_expand=complex_expand, K=K, include_bias=include_bias)
     def setup_fit(self, confset, target_amplitudes, ref_sites, minimize_fun=None, linesearch_fun=None, weightings=None, log_fit_init=False):
         self.ref_sites = ref_sites
         self.weights = None
@@ -691,11 +732,12 @@ class QGPSGenLinMod(QGPSLearningExp):
         else:
             if self.weights is None:
                 weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+                if self.include_bias:
+                    weights = np.concatenate((weights, self.bias))
                 if self.complex_expand and self.epsilon.dtype==complex:
                     weights = np.concatenate((weights.real, weights.imag))
             else:
                 weights = self.weights
-
 
         if self.complex_expand and self.epsilon.dtype==complex:
             K = np.hstack((self.K, 1.j * self.K))
@@ -932,7 +974,10 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
     def predict(self, confset):
         assert(confset.size > 0)
         self.set_up_prediction(confset)
-        return np.sum(np.exp(np.einsum("ijk,j->ik", self.K_per_sym, ((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten()))), axis=-1)
+        if self.include_bias:
+            return np.sum(np.exp(np.einsum("ijk,j->ik", self.K_per_sym, ((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten())) + self.bias), axis=-1)
+        else:
+            return np.sum(np.exp(np.einsum("ijk,j->ik", self.K_per_sym, ((self.epsilon[:, self.support_dim_range_ids, self.ref_sites].T).flatten()))), axis=-1)
 
     def setup_fit_alpha_dep(self, minimize_fun=None, linesearch_fun=None):
         self.active_elements = self.alpha_mat_ref_sites < self.alpha_cutoff
@@ -943,15 +988,19 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
         else:
             if self.weights is None:
                 weights = (self.epsilon[:, self.support_dim_range_ids, self.ref_sites]).T.flatten()
+                if self.include_bias:
+                    weights = np.concatenate((weights, self.bias))
                 if self.complex_expand and self.epsilon.dtype==complex:
                     weights = np.concatenate((weights.real, weights.imag))
             else:
                 weights = self.weights
 
+        if self.include_bias:
+            K = np.hstack((K, np.ones((self.K_per_sym.shape[0], 1, self.K_per_sym.shape[2]))))
+
         if self.complex_expand and self.epsilon.dtype==complex:
-            K = np.hstack((self.K_per_sym, 1.j * self.K_per_sym))
-        else:
-            K = self.K_per_sym
+            K = np.hstack((K, 1.j * K))
+
 
         self.valid_kern = _mpi_sum(np.sum(abs(K), axis=(0,-1))) > self.kern_cutoff
         self.active_elements = np.logical_and(self.active_elements, self.valid_kern)
@@ -1062,49 +1111,3 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
 
         if self.active_elements.any() > 0:
             self.weights[self.active_elements] = weights
-
-    # TODO: fix prefactors, double check, etc.
-    def log_marg_lik(self):
-        if self.epsilon.dtype==complex:
-            log_lik = (np.log(self.beta) - np.log(np.pi)) * self.N_data
-        else:
-            log_lik = (np.log(self.beta) - np.log(2*np.pi)) * self.N_data
-
-        if self.cholesky:
-            if self.complex_expand and self.epsilon.dtype==complex:
-                log_lik += 0.5 * np.sum(np.log(0.5 * abs(np.diag(self.Sinv_L))**2))
-            else:
-                log_lik += 2 * np.sum(np.log(abs(np.diag(self.Sinv_L))))
-        else:
-            if self.complex_expand and self.epsilon.dtype==complex:
-                log_lik += 0.5 * np.linalg.slogdet(0.5 * self.Sinv)[1]
-            else:
-                log_lik += np.linalg.slogdet(self.Sinv)[1]
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            log_lik += 0.5 * np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
-        else:
-            log_lik += np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            K = np.hstack((self.K, 1.j * self.K))
-        else:
-            K = self.K
-
-        K = K[:, self.active_elements]
-        weights = self.weights[self.active_elements]
-
-        pred = np.exp(K.dot(weights))
-        loss = self.beta * _mpi_sum(np.sum(self.weightings * abs(self.exp_amps - pred)**2))
-
-        if self.complex_expand and self.epsilon.dtype==complex:
-            loss += np.sum(self.alpha_mat_ref_sites[self.active_elements]/2 * abs(weights)**2)
-        else:
-            loss += np.sum(self.alpha_mat_ref_sites[self.active_elements] * abs(weights)**2)
-
-        log_lik -= loss
-
-        if self.epsilon.dtype==float:
-            log_lik *= 0.5
-
-        return log_lik.real
