@@ -186,6 +186,8 @@ class Slater(nn.Module):
             # First we need to determine which electrons move (and where they move)
             occupancies_save = sample_save.value
             old_occupancies = jax.vmap(jnp.take, in_axes=(0, 0), out_axes=0)(occupancies_save, update_sites)
+            old_occupancies = jnp.asarray(old_occupancies, jnp.int32)
+            x = jnp.asarray(x, jnp.int32)
             spin_up_updates = (old_occupancies & 1).astype(int) - (x & 1).astype(int)
             spin_down_updates = ((old_occupancies & 2).astype(int) - (x & 2).astype(int))//2
             updates = jnp.concatenate((spin_up_updates, spin_down_updates), axis=-1) # 0: nothing, 1: remove electron, -1: add electron
@@ -365,6 +367,7 @@ class Slater(nn.Module):
             else:
                 full_samples = x
 
+            full_samples = jnp.asarray(full_samples, jnp.int32)
             sample_save.value = full_samples
 
             # Store the cummulative elextron counts (required for fast evaluation of the parity update)
