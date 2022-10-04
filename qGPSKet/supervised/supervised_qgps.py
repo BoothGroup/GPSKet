@@ -772,8 +772,13 @@ class QGPSGenLinMod(QGPSLearningExp):
                     weights = np.linalg.lstsq(KtK_alpha, y, rcond=None)[0]
             _MPI_comm.Bcast(weights, root=0)
 
-        # TODO: double check this for complex parameters and for non-vanishing alpha parameters
+        # TODO: double check for non-vanishing alpha parameters
+        # TODO: implement for complex parameters
         # Implements the iteratively reweighted least squares approach
+
+        if it_rew_lst_sq_steps > 0:
+            assert(self.epsilon.dtype != complex)
+
         for i in range(it_rew_lst_sq_steps):
             pred = np.exp(K.dot(weights))
             e = (self.exp_amps - pred)/pred
