@@ -324,10 +324,11 @@ class QGPSLearning():
 
 
 class QGPSLearningExp(QGPSLearning):
-    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, complex_expand=False, K=None, include_bias=False):
+    def __init__(self, epsilon, init_alpha = 1.0, init_noise_tilde = 1.e-1, complex_expand=False, K=None, include_bias=False, iterative_noise_est=False):
         super().__init__(epsilon, init_alpha=init_alpha, complex_expand=complex_expand, K=K, include_bias=include_bias)
 
         self.noise_tilde = init_noise_tilde
+        self.iterative_noise_est = iterative_noise_est
 
     def predict(self, confset):
         assert(confset.size > 0)
@@ -341,7 +342,11 @@ class QGPSLearningExp(QGPSLearning):
         if self.noise_tilde == 0.:
             self.S_diag = np.ones(len(self.exp_amps))
         else:
-            self.S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
+            if self.iterative_noise_est:
+                pred = self.predict(self.confs)
+                self.S_diag = 1/(np.log(0.5 * (np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1) + 1)))
+            else:
+                self.S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
         if weightings is not None:
             self.S_diag *= weightings
         self.weightings = weightings
