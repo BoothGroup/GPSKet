@@ -344,7 +344,7 @@ class QGPSLearningExp(QGPSLearning):
         else:
             if self.iterative_noise_est:
                 pred = self.predict(self.confs)
-                self.S_diag = 1/(np.log(0.5 * (np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1) + 1)))
+                self.S_diag = 1/(np.log1p(np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1) + 1) + np.log(0.5))
             else:
                 self.S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
         if weightings is not None:
@@ -418,7 +418,12 @@ class QGPSLearningExp(QGPSLearning):
         return log_lik.real
 
     def log_marg_lik_noise_der(self):
-        del_S = 1/((abs(self.exp_amps)**2) * (1 + self.noise_tilde/(abs(self.exp_amps)**2)))
+        if self.iterative_noise_est:
+            pred = self.predict(self.confs)
+            del_S = (1/((np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1) + 1))) * 2/((abs(pred)**2) * np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1))
+        else:
+            del_S = 1/((abs(self.exp_amps)**2) * (1 + self.noise_tilde/(abs(self.exp_amps)**2)))
+
         Delta_S = - (self.S_diag**2 * del_S)
 
         if self.weightings is not None:
