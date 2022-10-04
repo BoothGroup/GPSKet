@@ -344,7 +344,7 @@ class QGPSLearningExp(QGPSLearning):
         else:
             if self.iterative_noise_est:
                 pred = self.predict(self.confs)
-                self.S_diag = 1/(np.log1p(np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1) + 1) + np.log(0.5))
+                self.S_diag = 1/(np.log1p(np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1)) + np.log(0.5))
             else:
                 self.S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
         if weightings is not None:
