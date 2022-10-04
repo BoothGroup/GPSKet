@@ -402,10 +402,12 @@ class QGPSLearningExp(QGPSLearning):
             else:
                 log_lik += np.linalg.slogdet(self.Sinv)[1]
 
+        active_alpha = np.logical_and(self.active_elements, self.alpha_mat_ref_sites > 0.)
+
         if self.complex_expand and self.epsilon.dtype==complex:
-            log_lik += 0.5 * np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
+            log_lik += 0.5 * np.sum(np.log(self.alpha_mat_ref_sites[active_alpha]))
         else:
-            log_lik += np.sum(np.log(self.alpha_mat_ref_sites[self.active_elements]))
+            log_lik += np.sum(np.log(self.alpha_mat_ref_sites[active_alpha]))
 
         weights = self.weights[self.active_elements]
         log_lik += np.dot(weights.conj(), np.dot(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], weights))
