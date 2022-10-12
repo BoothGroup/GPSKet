@@ -10,3 +10,5 @@ from .autoreg_plaquetteqGPS import ARPlaquetteqGPS
 from .asymm_qGPS import ASymmqGPS, ASymmqGPSProd
 
 from .slater import Slater, occupancies_to_electrons
+
+from .backflow import Backflow
