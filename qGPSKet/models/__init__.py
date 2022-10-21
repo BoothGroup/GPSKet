@@ -1,5 +1,6 @@
-from .qGPS import get_sym_transformation_spin, no_syms
-from .qGPS import qGPS
+from .qGPS import qGPS, get_sym_transformation_spin, no_syms
+
+from .plaquetteqGPS import PlaquetteqGPS
 
 from .autoreg_qGPS import ARqGPS, ARqGPSModPhase
 
