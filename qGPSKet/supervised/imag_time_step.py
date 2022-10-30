@@ -5,6 +5,8 @@ import copy
 
 from netket.vqs.mc import get_local_kernel_arguments, get_local_kernel
 
+from netket.utils import wrap_afun
+
 from functools import partial
 
 class ImagTimeStep():
@@ -29,6 +31,8 @@ class ImagTimeStep():
 def get_imag_time_step_vstate(tau, hamiltonian, vstate):
     """Returns a variational state with a first order imaginary time evolved model (i.e. (1 - tau H)|Psi>)
     based on a given variational state, can therefore be nested arbitrarily often.
+    Fast updating (if requested) is currently only applied in the innermost local energy
+    evaluations (which could be slightly improved in the future...).
 
     Args:
         tau: Propagation time
@@ -47,4 +51,5 @@ def get_imag_time_step_vstate(tau, hamiltonian, vstate):
         return log_amps + jnp.log(1 - tau * loc_ens)
     new_vstate = copy.deepcopy(vstate)
     new_vstate._apply_fun = imag_time_model_log_amp
+    new_vstate._model = wrap_afun(imag_time_model_log_amp)
     return new_vstate
