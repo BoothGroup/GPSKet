@@ -329,6 +329,7 @@ class QGPSLearningExp(QGPSLearning):
 
         self.noise_tilde = init_noise_tilde
         self.iterative_noise_est = iterative_noise_est
+        self.noise_reweighting = None
 
     def predict(self, confset):
         assert(confset.size > 0)
@@ -346,7 +347,10 @@ class QGPSLearningExp(QGPSLearning):
                 pred = self.predict(self.confs)
                 self.S_diag = 1/(np.log1p(np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1)) + np.log(0.5))
             else:
-                self.S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
+                if self.noise_reweighting is None:
+                    self.S_diag = 1/(np.log1p(self.noise_tilde/(abs(self.exp_amps)**2)))
+                else:
+                    self.S_diag = 1/(np.log1p(self.noise_tilde/((abs(self.exp_amps)**2)/self.noise_reweighting)))
         if weightings is not None:
             self.S_diag *= weightings
         self.weightings = weightings
@@ -420,9 +424,9 @@ class QGPSLearningExp(QGPSLearning):
     def log_marg_lik_noise_der(self):
         if self.iterative_noise_est:
             pred = self.predict(self.confs)
-            del_S = (1/((np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1) + 1))) * 2/((abs(pred)**2) * np.sqrt((4 * self.noise_tilde/(abs(pred)**2)) + 1))
+            del_S = (1/((np.sqrt((4 * self.noise_tilde/((abs(pred)**2)/self.noise_reweighting)) + 1) + 1))) * 2/(((abs(pred)**2)/self.noise_reweighting) * np.sqrt((4 * self.noise_tilde/((abs(pred)**2)/self.noise_reweighting)) + 1))
         else:
-            del_S = 1/((abs(self.exp_amps)**2) * (1 + self.noise_tilde/(abs(self.exp_amps)**2)))
+            del_S = 1/(((abs(self.exp_amps)**2)/self.noise_reweighting) * (1 + self.noise_tilde/((abs(self.exp_amps)**2)/self.noise_reweighting)))
 
         Delta_S = - (self.S_diag**2 * del_S)
 
