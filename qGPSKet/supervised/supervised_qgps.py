@@ -743,7 +743,7 @@ class QGPSLogSpaceFit(QGPSLearningExp):
 
     def setup_fit(self, confset, log_amplitudes, ref_sites, weightings=None, prior_mean=0.):
         self.ref_sites = ref_sites
-        self.fit_data = log_amplitudes
+        self.fit_data = log_amplitudes.copy()
         self.set_kernel_mat(confset)
         if self.include_bias:
             self.fit_data -= prior_mean * np.sum(self.K[:,:-1], axis=1)
