@@ -8,6 +8,8 @@ from netket.vqs.mc import get_local_kernel_arguments, get_local_kernel
 
 from netket.utils import wrap_afun
 
+from flax.core import freeze
+
 from functools import partial
 
 class ImagTimeStep():
@@ -53,11 +55,13 @@ def get_imag_time_step_vstate(tau, hamiltonian, vstate):
     else:
         local_estimator_fun = get_local_kernel(vstate, hamiltonian, vstate.chunk_size)
     def imag_time_model_log_amp(model_pars, samples):
+        pars, tau = freeze(model_pars).pop("tau")
         samps = samples.reshape((-1, samples.shape[-1]))
-        loc_ens = local_estimator_fun(log_model, model_pars, samps, args)
-        log_amps = log_model(model_pars, samps)
+        loc_ens = local_estimator_fun(log_model, pars, samps, args)
+        log_amps = log_model(pars, samps)
         return log_amps + jnp.log(1 - tau * loc_ens)
     new_vstate = copy.deepcopy(vstate)
     new_vstate._apply_fun = imag_time_model_log_amp
     new_vstate._model = wrap_afun(imag_time_model_log_amp)
+    new_vstate.model_state = {"tau": tau, **new_vstate.model_state}
     return new_vstate
