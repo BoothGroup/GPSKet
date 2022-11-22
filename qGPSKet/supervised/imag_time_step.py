@@ -59,7 +59,7 @@ def get_imag_time_step_vstate(tau, hamiltonian, vstate):
         samps = samples.reshape((-1, samples.shape[-1]))
         loc_ens = local_estimator_fun(log_model, pars, samps, args)
         log_amps = log_model(pars, samps)
-        return log_amps + jnp.log(1 - tau * loc_ens)
+        return log_amps + jnp.log(1/tau - 1 * loc_ens) + jnp.log(tau)
     new_vstate = copy.deepcopy(vstate)
     new_vstate._apply_fun = imag_time_model_log_amp
     new_vstate._model = wrap_afun(imag_time_model_log_amp)
