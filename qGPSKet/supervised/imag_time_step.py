@@ -3,9 +3,12 @@ import jax
 import jax.numpy as jnp
 import copy
 
+from netket.vqs.mc.mc_state.expect_chunked import get_local_kernel
 from netket.vqs.mc import get_local_kernel_arguments, get_local_kernel
 
 from netket.utils import wrap_afun
+
+from flax.core import freeze
 
 from functools import partial
 
@@ -33,6 +36,9 @@ def get_imag_time_step_vstate(tau, hamiltonian, vstate):
     based on a given variational state, can therefore be nested arbitrarily often.
     Fast updating (if requested) is currently only applied in the innermost local energy
     evaluations (which could be slightly improved in the future...).
+    CAREFUL: This is only correct for custom Hamiltonians evaluating the energy on the fly (without explicitly
+    generating the connected configurations).
+    TODO: Add check that evaluation is sensible with the given Hamiltonian (not entirely trivial)
 
     Args:
         tau: Propagation time
@@ -44,12 +50,18 @@ def get_imag_time_step_vstate(tau, hamiltonian, vstate):
     """
     log_model = vstate._apply_fun
     _, args = get_local_kernel_arguments(vstate, hamiltonian)
-    local_estimator_fun = get_local_kernel(vstate, hamiltonian, chunk_size=vstate.chunk_size)
+    if vstate.chunk_size is None:
+        local_estimator_fun = get_local_kernel(vstate, hamiltonian)
+    else:
+        local_estimator_fun = get_local_kernel(vstate, hamiltonian, vstate.chunk_size)
     def imag_time_model_log_amp(model_pars, samples):
-        loc_ens = local_estimator_fun(log_model, model_pars, samples, args)
-        log_amps = log_model(model_pars, samples)
-        return log_amps + jnp.log(1 - tau * loc_ens)
+        pars, tau = freeze(model_pars).pop("tau")
+        samps = samples.reshape((-1, samples.shape[-1]))
+        loc_ens = local_estimator_fun(log_model, pars, samps, args)
+        log_amps = log_model(pars, samps)
+        return log_amps + jnp.log(1/tau - 1 * loc_ens) + jnp.log(tau)
     new_vstate = copy.deepcopy(vstate)
     new_vstate._apply_fun = imag_time_model_log_amp
     new_vstate._model = wrap_afun(imag_time_model_log_amp)
+    new_vstate.model_state = {"tau": tau, **new_vstate.model_state}
     return new_vstate
