@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from jax.nn.initializers import normal
 from flax import linen as nn
 from netket.models import Jastrow
-from netket.utils.types import Array, DType, NNInitFunc
+from netket.utils.types import Array, DType, NNInitFunc, Callable
 from .slater import Slater
 from .jastrow import Jastrow
 from ..hilbert.discrete_fermion import FermionicDiscreteHilbert
@@ -24,6 +24,10 @@ class SlaterJastrow(nn.Module):
     """Initializer for the variational parameters of the Slater determinant"""
     jastrow_init_fun: NNInitFunc=normal()
     """Initializer for the variational parameters of the Jastrow coefficient"""
+    slater_apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    """Function to apply symmetries to configurations in the Slater determinant"""
+    jastrow_apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    """Function to apply symmetries to configurations in the Jastrow factor"""
     apply_fast_update: bool=True
     """Whether fast update is used in the computation of the Slater determinants"""
     spin_symmetry_by_structure: bool=True
@@ -38,6 +42,7 @@ class SlaterJastrow(nn.Module):
             n_determinants=self.n_determinants,
             dtype=self.dtype,
             init_fun=self.slater_init_fun,
+            symmetries=self.slater_apply_symmetries,
             spin_symmetry_by_structure=self.spin_symmetry_by_structure,
             fixed_magnetization=self.fixed_magnetization,
             apply_fast_update=self.apply_fast_update
@@ -45,6 +50,7 @@ class SlaterJastrow(nn.Module):
         jastrow = Jastrow(
             self.hilbert,
             dtype=self.dtype,
-            init_fun=self.jastrow_init_fun
+            init_fun=self.jastrow_init_fun,
+            apply_symmetries=self.jastrow_apply_symmetries
         )(x)
         return slater+jastrow
