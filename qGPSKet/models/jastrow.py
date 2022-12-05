@@ -1,8 +1,9 @@
+import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from flax.linen.dtypes import promote_dtype
 from jax.nn.initializers import normal
-from netket.utils.types import Array, DType, NNInitFunc
+from netket.utils.types import Array, DType, NNInitFunc, Callable
 from ..hilbert import FermionicDiscreteHilbert
 
 
@@ -32,13 +33,16 @@ class Jastrow(nn.Module):
     """Type of the variational parameters"""
     init_fun: NNInitFunc=normal()
     """Initializer for the variational parameters"""
+    apply_symmetries: Callable=lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    """Function to apply symmetries to configurations"""
 
     @nn.compact
     def __call__(self, x) -> Array:
         nsites = x.shape[-1]
         kernel = self.param("kernel", self.init_fun, (nsites, nsites), self.dtype)
         kernel = kernel + kernel.T
+        x = self.apply_symmetries(x) # (B, T)
         x_up, x_dn = up_down_occupancies(x)
         kernel, x_up, x_dn = promote_dtype(kernel, x_up, x_dn, dtype=None)
-        y = jnp.einsum("...i,ij,...j", (1-x_up), kernel, (1-x_dn))
-        return y
+        y = jax.vmap(lambda u,d: jnp.einsum("...i,ij,...j", (1-u), kernel, (1-d)), in_axes=(-1,-1), out_axes=-1)(x_up, x_dn)
+        return jnp.sum(y, axis=-1) # (B,)
