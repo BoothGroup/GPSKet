@@ -374,7 +374,7 @@ class QGPSLearning():
             if self.complex_expand and self.epsilon.dtype==complex:
                 self.bias += 1.j*self.weights[-1]
 
-        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:no_epsilon_weights].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
+        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = (weights[:no_epsilon_weights]+ prior_mean).reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
 
         if self.complex_expand and self.epsilon.dtype==complex:
             if self.include_bias:
@@ -436,9 +436,9 @@ class QGPSLearningExp(QGPSLearning):
             self.fit_data = np.log(self.exp_amps)
         self.set_kernel_mat(confset)
         if self.include_bias:
-            self.fit_data -= prior_mean * np.sum(self.K[:,:-1], axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K[:,:-1], axis=1)
         else:
-            self.fit_data -= prior_mean * np.sum(self.K, axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K, axis=1)
         self.setup_fit_noise_dep(weightings=weightings)
 
     def log_marg_lik(self):
@@ -747,9 +747,9 @@ class QGPSLogSpaceFit(QGPSLearningExp):
         self.fit_data = log_amplitudes.copy()
         self.set_kernel_mat(confset)
         if self.include_bias:
-            self.fit_data -= prior_mean * np.sum(self.K[:,:-1], axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K[:,:-1], axis=1)
         else:
-            self.fit_data -= prior_mean * np.sum(self.K, axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K, axis=1)
         self.weightings = weightings
         if self.weightings is not None:
             self.KtK = _mpi_sum(np.dot(self.K.conj().T, np.einsum("i,ij->ij", self.weightings, self.K)))
