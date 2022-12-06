@@ -231,12 +231,20 @@ class QGPSLearning():
                 L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
                 self.Sinv_L = sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True)
                 weights = sp.linalg.cho_solve((L, True), self.y[self.active_elements])
+                self.Sinv = None
                 self.cholesky = True
             except:
                 self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
                 weights = self.Sinv.dot(self.y[self.active_elements])
                 self.cholesky = False
 
+        # This is just to ensure that each rank does the same update
+        _MPI_comm.Bcast(weights)
+
+        if self.cholesky:
+            _MPI_comm.Bcast(self.Sinv_L)
+        else:
+            _MPI_comm.Bcast(self.Sinv)
 
         if self.weights is None:
             if not self.complex_expand and self.epsilon.dtype==complex:
