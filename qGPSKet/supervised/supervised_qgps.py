@@ -17,8 +17,6 @@ from netket.utils.mpi import (
 
 from mpi4py import MPI
 
-from threadpoolctl import threadpool_limits
-
 class QGPSLearning():
     def __init__(self, epsilon, init_alpha=1.0, complex_expand=False, K=None, include_bias=False):
         self.K = K
@@ -39,10 +37,10 @@ class QGPSLearning():
         self._ref_sites = None
         if self.precomputed_features:
             if self.complex_expand and self.epsilon.dtype==complex:
-                self.alpha_mat = np.ones(self.K.shape[0]*2)*init_alpha
+                self.alpha_mat = np.ones(self.K.shape[1]*2)*init_alpha
                 self.alpha_bias = np.ones(2)*init_alpha
             else:
-                self.alpha_mat = np.ones(self.K.shape[0])*init_alpha
+                self.alpha_mat = np.ones(self.K.shape[1])*init_alpha
                 self.alpha_bias = np.ones(1)*init_alpha
         else:
             if self.complex_expand and self.epsilon.dtype==complex:
@@ -55,7 +53,6 @@ class QGPSLearning():
         self.alpha_cutoff = 1.e10
         self.kern_cutoff = 1.e-10
         self.alpha_convergence_tol = 1.e-15
-        self.max_threads = 1
         self.bias = np.zeros(1, dtype=epsilon.dtype)
         self.beta = 1.0
 
@@ -180,7 +177,10 @@ class QGPSLearning():
                 confs = np.expand_dims(confs, axis=-1)
 
             if self.confs is not None:
-                if not np.array_equal(self.confs, confs) or self.site_prod is None:
+                same_configs = self.confs is confs
+                if not same_configs:
+                    same_configs = np.array_equal(self.confs, confs)
+                if (not same_configs) or (self.site_prod is None):
                     recompute_site_prod = True
                 elif not np.array_equal(self.ref_sites, self.site_prod_ref_sites):
                     self.update_site_prod()
@@ -200,10 +200,10 @@ class QGPSLearning():
             if update_K:
                 self.K_per_sym = self.kernel_mat_inner(self.site_prod, self.confs, self.K_per_sym, self.ref_sites)
 
-        self.K = np.sum(self.K_per_sym, axis=-1)
+            self.K = np.sum(self.K_per_sym, axis=-1)
 
-        if self.include_bias:
-            self.K = np.concatenate((self.K, np.ones((self.K.shape[0],1))), axis=1)
+            if self.include_bias:
+                self.K = np.concatenate((self.K, np.ones((self.K.shape[0],1))), axis=1)
 
         return self.K
 
@@ -225,28 +225,23 @@ class QGPSLearning():
 
         self.cholesky = False
         self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
-        weights = np.zeros(np.sum(self.active_elements), dtype=self.y.dtype)
 
         if self.active_elements.any():
-            if _rank == 0:
-                with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                    try:
-                        L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
-                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        np.copyto(weights, sp.linalg.cho_solve((L, True), self.y[self.active_elements]))
-                        self.cholesky = True
-                    except:
-                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)]))
-                        np.copyto(weights, self.Sinv.dot(self.y[self.active_elements]))
-
-            _MPI_comm.Bcast(self.Sinv, root=0)
-            _MPI_comm.Bcast(weights, root=0)
-            self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
-
-            # This bit is just to emphasize that self.Sinv is not the inverse of sigma but its Cholesky decomposition if self.cholesky==True
-            if self.cholesky:
-                self.Sinv_L = self.Sinv
+            try:
+                L = sp.linalg.cholesky(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)], lower=True)
+                self.Sinv_L = sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True)
+                weights = sp.linalg.cho_solve((L, True), self.y[self.active_elements])
                 self.Sinv = None
+                self.cholesky = True
+                # This is just to ensure that each rank does the same update
+                _MPI_comm.Bcast(weights)
+                _MPI_comm.Bcast(self.Sinv_L)
+            except:
+                self.Sinv = sp.linalg.pinvh(self.KtK_alpha[np.ix_(self.active_elements, self.active_elements)])
+                weights = self.Sinv.dot(self.y[self.active_elements])
+                self.cholesky = False
+                _MPI_comm.Bcast(weights)
+                _MPI_comm.Bcast(self.Sinv)
 
         if self.weights is None:
             if not self.complex_expand and self.epsilon.dtype==complex:
@@ -384,7 +379,7 @@ class QGPSLearning():
             if self.complex_expand and self.epsilon.dtype==complex:
                 self.bias += 1.j*self.weights[-1]
 
-        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = weights[:no_epsilon_weights].reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T + prior_mean
+        self.epsilon[:, self.support_dim_range_ids, self.ref_sites] = (weights[:no_epsilon_weights]+ prior_mean).reshape(self.epsilon.shape[1], self.epsilon.shape[0]).T
 
         if self.complex_expand and self.epsilon.dtype==complex:
             if self.include_bias:
@@ -427,7 +422,9 @@ class QGPSLearningExp(QGPSLearning):
 
         self.KtK = _mpi_sum(np.dot(self.K.conj().T, np.einsum("i,ij->ij", self.S_diag, self.K)))
 
-        self.y = _mpi_sum(self.K.conj().T.dot(self.S_diag * self.fit_data))
+        multiplicator = self.S_diag * self.fit_data
+        multiplicator[self.exp_amps==0.] = -1/2
+        self.y = _mpi_sum(self.K.conj().T.dot(multiplicator))
 
         if self.complex_expand and self.epsilon.dtype==complex:
             self.KtK = np.block([[self.KtK.real, -self.KtK.imag],[self.KtK.imag, self.KtK.real]])
@@ -444,25 +441,26 @@ class QGPSLearningExp(QGPSLearning):
             self.fit_data = np.log(self.exp_amps)
         self.set_kernel_mat(confset)
         if self.include_bias:
-            self.fit_data -= prior_mean * np.sum(self.K[:,:-1], axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K[:,:-1], axis=1)
         else:
-            self.fit_data -= prior_mean * np.sum(self.K, axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K, axis=1)
         self.setup_fit_noise_dep(weightings=weightings)
 
     def log_marg_lik(self):
         if self.weightings is not None:
             if self.epsilon.dtype==complex:
-                log_lik = -(np.sum(self.weightings * np.log(np.pi/(self.S_diag/self.weightings))))
+                log_lik = -(np.sum(self.weightings * np.log(np.pi/(self.S_diag[self.exp_amps!=0.]/self.weightings))))
             else:
-                log_lik = -(np.sum(self.weightings * np.log(2*np.pi/(self.S_diag/self.weightings))))
+                log_lik = -(np.sum(self.weightings * np.log(2*np.pi/(self.S_diag[self.exp_amps!=0.]/self.weightings))))
         else:
             if self.epsilon.dtype==complex:
-                log_lik = -(np.sum(np.log(np.pi/self.S_diag)))
+                log_lik = -(np.sum(np.log(np.pi/self.S_diag[self.exp_amps!=0.])))
             else:
-                log_lik = -(np.sum(np.log(2*np.pi/self.S_diag)))
+                log_lik = -(np.sum(np.log(2*np.pi/self.S_diag[self.exp_amps!=0.])))
 
 
-        log_lik -= np.dot(self.fit_data.conj(), self.S_diag * self.fit_data)
+
+        log_lik -= np.dot(self.fit_data.conj()[self.exp_amps!=0.], (self.S_diag * self.fit_data)[self.exp_amps!=0.])
         log_lik = _MPI_comm.allreduce(log_lik)
 
         if self.cholesky:
@@ -494,9 +492,15 @@ class QGPSLearningExp(QGPSLearning):
     def log_marg_lik_noise_der(self):
         if self.iterative_noise_est:
             pred = self.predict(self.confs)
-            del_S = (1/((np.sqrt((4 * self.noise_tilde/((abs(pred)**2)/self.noise_reweighting)) + 1) + 1))) * 2/(((abs(pred)**2)/self.noise_reweighting) * np.sqrt((4 * self.noise_tilde/((abs(pred)**2)/self.noise_reweighting)) + 1))
+            if self.noise_reweighting is None:
+                del_S = (1/((np.sqrt((4 * self.noise_tilde/((abs(pred)**2))) + 1) + 1))) * 2/(((abs(pred)**2)) * np.sqrt((4 * self.noise_tilde/((abs(pred)**2))) + 1))
+            else:
+                del_S = (1/((np.sqrt((4 * self.noise_tilde/((abs(pred)**2)/self.noise_reweighting)) + 1) + 1))) * 2/(((abs(pred)**2)/self.noise_reweighting) * np.sqrt((4 * self.noise_tilde/((abs(pred)**2)/self.noise_reweighting)) + 1))
         else:
-            del_S = 1/(((abs(self.exp_amps)**2)/self.noise_reweighting) * (1 + self.noise_tilde/((abs(self.exp_amps)**2)/self.noise_reweighting)))
+            if self.noise_reweighting is None:
+                del_S = 1/((abs(self.exp_amps)**2) * (1 + self.noise_tilde/(abs(self.exp_amps)**2)))
+            else:
+                del_S = 1/(((abs(self.exp_amps)**2)/self.noise_reweighting) * (1 + self.noise_tilde/((abs(self.exp_amps)**2)/self.noise_reweighting)))
 
         Delta_S = - (self.S_diag**2 * del_S)
 
@@ -606,19 +610,19 @@ class QGPSLearningExp(QGPSLearning):
     '''
 
     def compute_sparsity_quantities(self):
-        bxy = self.y
-        bxx = np.diag(self.KtK)
+        bxy = self.beta * self.y
+        bxx = self.beta * np.diag(self.KtK)
 
         if self.cholesky:
             xxr = np.dot(self.KtK[:, self.active_elements], self.Sinv_L.conj().T)
             rxy = np.dot(self.Sinv_L, self.y[self.active_elements])
-            S = bxx - np.sum(abs(xxr) ** 2, axis=1)
-            Q = bxy - np.dot(xxr, rxy)
+            S = bxx - self.beta**2 * np.sum(abs(xxr) ** 2, axis=1)
+            Q = bxy - self.beta**2 * np.dot(xxr, rxy)
         else:
             XXa = self.KtK[:, self.active_elements]
             XS = np.dot(XXa, self.Sinv)
-            S = bxx - np.sum(XS * XXa, 1)
-            Q = bxy - np.dot(XS, self.y[self.active_elements])
+            S = bxx - self.beta**2 * np.sum(XS * XXa, 1)
+            Q = bxy - self.beta**2 * np.dot(XS, self.y[self.active_elements])
 
         S = S.real
         Q = Q.real
@@ -701,7 +705,9 @@ class QGPSLearningExp(QGPSLearning):
                 projections = (abs(self.y) **2 / np.diag(self.KtK))
                 ind = np.argmax(projections)
 
-                alpha_est = (((np.diag(self.KtK))**2 / (abs(self.y)**2 - np.diag(self.KtK))).real)[ind]
+                assert(_n_nodes == 1)
+
+                alpha_est = (np.diag(self.KtK)[ind] / (projections[ind] - 1/self.beta))
 
                 if alpha_est > 0.:
                     alpha[ind] = alpha_est
@@ -711,7 +717,7 @@ class QGPSLearningExp(QGPSLearning):
                     alpha[ind] = 1.
                     if self.complex_expand and self.epsilon.dtype==complex:
                         alpha[ind] *= 2
-                    print(alpha_est)
+                    print("Warning!", alpha_est)
             self.alpha_mat_ref_sites = alpha
             self.setup_fit_alpha_dep()
 
@@ -746,9 +752,9 @@ class QGPSLogSpaceFit(QGPSLearningExp):
         self.fit_data = log_amplitudes.copy()
         self.set_kernel_mat(confset)
         if self.include_bias:
-            self.fit_data -= prior_mean * np.sum(self.K[:,:-1], axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K[:,:-1], axis=1)
         else:
-            self.fit_data -= prior_mean * np.sum(self.K, axis=1)
+            self.fit_data -= np.sum(prior_mean * self.K, axis=1)
         self.weightings = weightings
         if self.weightings is not None:
             self.KtK = _mpi_sum(np.dot(self.K.conj().T, np.einsum("i,ij->ij", self.weightings, self.K)))
@@ -919,10 +925,7 @@ class QGPSGenLinMod(QGPSLearningExp):
             else:
                 KtK_alpha = KtK + np.diag(self.alpha_mat_ref_sites)
 
-            if _rank == 0:
-                with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                    weights = np.linalg.lstsq(KtK_alpha, y, rcond=None)[0]
-            _MPI_comm.Bcast(weights, root=0)
+            weights = np.linalg.lstsq(KtK_alpha, y, rcond=None)[0]
 
         # TODO: double check for non-vanishing alpha parameters
         # TODO: implement for complex parameters
@@ -947,17 +950,12 @@ class QGPSGenLinMod(QGPSLearningExp):
                 KtK_alpha = KtK + np.diag(self.alpha_mat_ref_sites)
 
             if self.active_elements.any():
-                if _rank == 0:
-                    with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                        try:
-                            L = sp.linalg.cholesky(KtK_alpha, lower=True)
-                            np.copyto(Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                            weights[self.active_elements] = sp.linalg.cho_solve((L, True), y)
-                            cholesky = True
-                        except:
-                            weights[self.active_elements] = np.linalg.lstsq(KtK_alpha, y)[0]
-
-            _MPI_comm.Bcast(weights, root=0)
+                try:
+                    L = sp.linalg.cholesky(KtK_alpha, lower=True)
+                    Sinv = sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True)
+                    weights[self.active_elements] = sp.linalg.cho_solve((L, True), y)
+                except:
+                    weights[self.active_elements] = np.linalg.lstsq(KtK_alpha, y)[0]
 
         K = K[:, self.active_elements]
         weights = weights[self.active_elements]
@@ -1013,16 +1011,15 @@ class QGPSGenLinMod(QGPSLearningExp):
 
         update_directions = np.zeros_like(weights)
         if self.active_elements.any():
-            if _rank == 0:
-                with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                    try:
-                        L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
-                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        update_directions = -sp.linalg.cho_solve((L, True), self.grad)
-                        self.cholesky = True
-                    except:
-                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
-                        update_directions = -self.Sinv.dot(self.grad)
+            try:
+                L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
+                self.Sinv = sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True)
+                update_directions = -sp.linalg.cho_solve((L, True), self.grad)
+                self.cholesky = True
+            except:
+                self.Sinv = sp.linalg.pinvh(self.KtK_alpha)
+                update_directions = -self.Sinv.dot(self.grad)
+                self.cholesky = False
 
             _MPI_comm.Bcast(self.Sinv, root=0)
             _MPI_comm.Bcast(update_directions, root=0)
@@ -1249,23 +1246,17 @@ class QGPSGenLinModProjSym(QGPSGenLinMod):
 
         self.cholesky = False
         self.Sinv = np.zeros((np.sum(self.active_elements), np.sum(self.active_elements)), dtype=self.KtK_alpha.dtype)
-
         update_directions = np.zeros_like(weights)
         if self.active_elements.any():
-            if _rank == 0:
-                with threadpool_limits(limits=self.max_threads, user_api="blas"):
-                    try:
-                        L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
-                        np.copyto(self.Sinv, sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True))
-                        update_directions = -sp.linalg.cho_solve((L, True), self.grad)
-                        self.cholesky = True
-                    except:
-                        np.copyto(self.Sinv, sp.linalg.pinvh(self.KtK_alpha))
-                        update_directions = -self.Sinv.dot(self.grad)
-
-            _MPI_comm.Bcast(self.Sinv, root=0)
-            _MPI_comm.Bcast(update_directions, root=0)
-            self.cholesky = _MPI_comm.bcast(self.cholesky, root=0)
+            try:
+                L = sp.linalg.cholesky(self.KtK_alpha, lower=True)
+                self.Sinv = sp.linalg.solve_triangular(L, np.eye(self.active_elements.sum()), check_finite=False, lower=True)
+                update_directions = -sp.linalg.cho_solve((L, True), self.grad)
+                self.cholesky = True
+            except:
+                self.Sinv = sp.linalg.pinvh(self.KtK_alpha)
+                update_directions = -self.Sinv.dot(self.grad)
+                self.cholesky = False
 
             if linesearch_fun is not None:
                 result = linesearch_fun(get_loss, get_grad, weights, update_directions)
