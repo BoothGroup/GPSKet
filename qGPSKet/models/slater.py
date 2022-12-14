@@ -2,7 +2,7 @@ import jax
 import numpy as np
 import jax.numpy as jnp
 from flax import linen as nn
-from typing import Tuple, Optional
+from typing import Tuple, Union, Optional
 from qGPSKet.hilbert import FermionicDiscreteHilbert
 from netket.utils.types import Array, Callable, DType, NNInitFunc
 from netket.utils import HashableArray
@@ -56,7 +56,7 @@ class Slater(nn.Module):
 
     dtype: DType = jnp.complex128
 
-    init_fun : NNInitFunc = jax.nn.initializers.orthogonal()
+    init_fun : Union[NNInitFunc,Tuple[NNInitFunc,NNInitFunc]] = jax.nn.initializers.orthogonal()
 
     symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
 
@@ -95,6 +95,13 @@ class Slater(nn.Module):
             assert(self.S2_projection is None) # While technically possible this does not make sense.
         if self.S2_projection is not None:
             assert(self.fixed_magnetization) # Not yet implemented
+        if self.fixed_magnetization:
+            if isinstance(self.init_fun, Tuple):
+                self._init_fun_up = self.init_fun[0]
+                self._init_fun_dn = self.init_fun[1]
+            else:
+                self._init_fun_up = self.init_fun
+                self._init_fun_dn = self.init_fun
 
     @nn.compact
     def __call__(self, x, cache_intermediates=False, update_sites=None) -> Array:
@@ -114,11 +121,11 @@ class Slater(nn.Module):
         if update_sites is None:
             # First set up the full matrices of orbitals (with spin-down orbitals indexed by indices site + L)
             if self.fixed_magnetization:
-                U_up = self.param("U_up", self.init_fun, (self.n_determinants, n_sites, self.hilbert._n_elec[0]), self.dtype)
+                U_up = self.param("U_up", self._init_fun_up, (self.n_determinants, n_sites, self.hilbert._n_elec[0]), self.dtype)
                 if self.spin_symmetry_by_structure:
                     U_down = U_up
                 else:
-                    U_down = self.param("U_down", self.init_fun, (self.n_determinants, n_sites, self.hilbert._n_elec[1]), self.dtype)
+                    U_down = self.param("U_down", self._init_fun_dn, (self.n_determinants, n_sites, self.hilbert._n_elec[1]), self.dtype)
 
                 def get_full_U(up_part, down_part):
                     return jnp.block([[up_part, jnp.zeros((n_sites, down_part.shape[1]), dtype=up_part.dtype)],

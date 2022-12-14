@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 from flax import linen as nn
+from typing import Union, Tuple
 from netket.utils import HashableArray
 from netket.utils.types import Array, Callable, DType, NNInitFunc
 from .slater import Slater
@@ -30,7 +31,7 @@ class ASymmqGPS(nn.Module):
     """Number of determinants"""
     dtype: DType = jnp.complex128
     """Type of the variational parameters"""
-    init_fun : NNInitFunc = orthogonal()
+    init_fun : Union[NNInitFunc,Tuple[NNInitFunc,NNInitFunc]] = orthogonal()
     """Initializer for the variational parameters"""
     coeffs : HashableArray = HashableArray(np.ones(1))
     """Coefficients of the terms in the linear combination of Slater determinants"""

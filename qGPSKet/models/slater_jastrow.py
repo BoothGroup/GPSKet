@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax.nn.initializers import normal
 from flax import linen as nn
+from typing import Union, Tuple
 from netket.models import Jastrow
 from netket.utils.types import Array, DType, NNInitFunc, Callable
 from .slater import Slater
@@ -20,7 +21,7 @@ class SlaterJastrow(nn.Module):
     """Type of the variational parameters"""
     n_determinants: int=1
     """Number of determinants"""
-    slater_init_fun: NNInitFunc=orthogonal()
+    slater_init_fun: Union[NNInitFunc,Tuple[NNInitFunc,NNInitFunc]] = orthogonal()
     """Initializer for the variational parameters of the Slater determinant"""
     jastrow_init_fun: NNInitFunc=normal()
     """Initializer for the variational parameters of the Jastrow coefficient"""
@@ -28,6 +29,8 @@ class SlaterJastrow(nn.Module):
     """Function to apply symmetries to configurations in the Slater determinant"""
     jastrow_apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations in the Jastrow factor"""
+    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(1, -1, -2))
+    """Final output transformation. Its input has shape (B, M, S, T)."""
     apply_fast_update: bool=True
     """Whether fast update is used in the computation of the Slater determinants"""
     spin_symmetry_by_structure: bool=True
@@ -45,6 +48,7 @@ class SlaterJastrow(nn.Module):
             symmetries=self.slater_apply_symmetries,
             spin_symmetry_by_structure=self.spin_symmetry_by_structure,
             fixed_magnetization=self.fixed_magnetization,
+            out_transformation=self.out_transformation,
             apply_fast_update=self.apply_fast_update
         )(x)
         jastrow = Jastrow(
