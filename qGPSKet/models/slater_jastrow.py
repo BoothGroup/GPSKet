@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from jax.nn.initializers import normal
 from flax import linen as nn
