@@ -53,7 +53,6 @@ class BackflowJastrow(nn.Module):
         backflow = jax.scipy.special.logsumexp(log_det, axis=-1)
         jastrow = Jastrow(
             self.hilbert,
-            dtype=self.dtype,
             init_fun=self.jastrow_init_fun,
             apply_symmetries=self.jastrow_apply_symmetries
         )(x)
