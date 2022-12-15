@@ -3,21 +3,43 @@ import jax.numpy as jnp
 from jax import dtypes
 
 
-def normal(sigma=1.e-1, dtype=complex):
-    def init_fun(key, shape, dtype=dtype):
-        if dtype is jnp.complex_:
-            phases = sigma * jax.random.normal(key, shape, float) *1.j
-            return jnp.exp(phases).astype(dtype)
-        else:
-            var = 1. + sigma * jax.random.normal(key, shape, dtype)
-            return var
+def normal(sigma=0.1, dtype=jnp.float_):
+    """
+    Constructs an initializer for a qGPS model.
+    Real parameters are normally distributed around 1.0, while complex parameters have unit length
+    and have normally distributed phases around 0.
+
+    Args:
+        sigma : width of the normal distribution
+        dtype : default dtype of the weights
+
+    Returns:
+        init function with signature `(key, shape, dtype) -> Array`
+    """
+    if jnp.iscomplexobj(dtype):
+        def init_fun(key, shape, dtype=dtype):
+            phase = jax.random.normal(key, shape, jnp.float32)*sigma
+            eps = jnp.exp(1j*phase).astype(dtype)
+            return eps
+    else:
+        def init_fun(key, shape, dtype=dtype):
+            eps = jnp.ones(shape, dtype)
+            eps += jax.random.normal(key, shape, dtype)*sigma
+            return eps
     return init_fun
 
 def orthogonal(scale=1.0, column_axis=-1, dtype=jnp.float_):
     """
     Constructs an initializer for a linear combination of matrices with orthogonal columns.
 
-    The shape must be 3D.
+    Args:
+        scale : width of the normal distribution
+        column_axis : the axis that contains the columns that should be orthogonal
+        dtype : default dtype of the weights
+
+    Returns:
+        init function with signature `(key, shape, dtype) -> Array`
+        Importantly, the shape must be 3D.
     """
     def init(key, shape, dtype=dtype):
         dtype = dtypes.canonicalize_dtype(dtype)
