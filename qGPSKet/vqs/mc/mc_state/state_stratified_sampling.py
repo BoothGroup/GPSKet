@@ -1,6 +1,6 @@
 import numpy as np
 
-from qGPSKet.vqs.mc.mc_state.state_unique_samples import MCStateUniqeSamples
+from qGPSKet.vqs.mc.mc_state.state_unique_samples import MCStateUniqueSamples
 
 import jax
 import jax.numpy as jnp
@@ -24,7 +24,7 @@ from dataclasses import replace
 """ Implements a state with stratified sampling, splitting the evaluation of expectation values
 into a determinisitic evaluation over a fixed set, and a sampled estimate over the complement.
 At the moment this is only an implementation for quick testing which is very slow. """
-class MCStateStratifiedSampling(MCStateUniqeSamples):
+class MCStateStratifiedSampling(MCStateUniqueSamples):
     def __init__(self, deterministic_samples, N_total, *args, rand_norm=True, number_random_samples=None, renormalize=True, **kwargs):
         super().__init__(*args, **kwargs)
 

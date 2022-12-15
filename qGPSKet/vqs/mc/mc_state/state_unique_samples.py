@@ -37,7 +37,7 @@ TODO: This needs to be cleaned up, we should think of the best approach to do th
 of expectation values can be trusted and sampler properties and variances are probably wrong because the
 approach is just hacked into the code with the least possible overhead.
 """
-class MCStateUniqeSamples(nk.vqs.MCState):
+class MCStateUniqueSamples(nk.vqs.MCState):
     def __init__(self, *args, max_sampling_steps=None, fill_with_random=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_sampling_steps = max_sampling_steps
@@ -138,7 +138,7 @@ class MCStateUniqeSamples(nk.vqs.MCState):
 
 """ The following functions just override the NetKet implementation to inject the sample counts into the expectation value evaluation."""
 @nk.vqs.expect_and_grad.dispatch(precedence=10)
-def expect_and_grad(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, use_covariance: TrueT, chunk_size: Optional[int], *, mutable:Any):
+def expect_and_grad(vstate: MCStateUniqueSamples, op: nk.operator.AbstractOperator, use_covariance: TrueT, chunk_size: Optional[int], *, mutable:Any):
     _, args = get_local_kernel_arguments(vstate, op)
     samples_and_counts = vstate.samples_with_counts
     if chunk_size is not None:
@@ -152,7 +152,7 @@ def expect_and_grad(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperato
     return exp, grad
 
 @nk.vqs.expect.dispatch(precedence=10)
-def expect(vstate: MCStateUniqeSamples, op: nk.operator.AbstractOperator, chunk_size: Optional[int]):
+def expect(vstate: MCStateUniqueSamples, op: nk.operator.AbstractOperator, chunk_size: Optional[int]):
     _, args = get_local_kernel_arguments(vstate, op)
     samples_and_counts = vstate.samples_with_counts
     if chunk_size is not None:

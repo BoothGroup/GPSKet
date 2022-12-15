@@ -1,1 +1,1 @@
-from .mc import MCStateUniqeSamples, MCStateStratifiedSampling
+from .mc import MCStateUniqueSamples, MCStateStratifiedSampling

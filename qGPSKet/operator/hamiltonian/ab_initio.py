@@ -214,10 +214,11 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
 
     n_sites = samples.shape[-1]
     def vmap_fun(sample):
+        sample = jnp.asarray(sample, jnp.uint8)
         is_occ_up = (sample & 1)
         is_occ_down = (sample & 2) >> 1
-        up_count = jnp.cumsum(is_occ_up, dtype=int)
-        down_count = jnp.cumsum(is_occ_down, dtype=int)
+        up_count = jnp.cumsum(is_occ_up, dtype=jnp.uint8)
+        down_count = jnp.cumsum(is_occ_down, dtype=jnp.uint8)
         is_empty_up = 1 >> is_occ_up
         is_empty_down = 1 >> is_occ_down
 
