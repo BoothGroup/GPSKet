@@ -13,4 +13,4 @@ Functionality implemented in this plugin includes:
 - Supervised learning of GPS within Bayesian frameworks
 
 The code is, at this stage, largely undocumented, but different example applications can be found in the tutorials folder.
-This (and further documentation) will be expanded in the near future.
+Further documentation and additional examples will be provided in the near future.
