@@ -36,6 +36,8 @@ class ARqGPSFull(AbstractARqGPS):
     # TODO: extend to cases where total_sz != 0
     renormalize_log_psi: Callable = lambda n_spins, hilbert, index: jnp.log(jnp.heaviside(hilbert.size//2-n_spins, 0))
     """Function to renormalize conditional log probabilities"""
+    out_transformation: Callable=lambda argument: jnp.sum(argument, axis=-1)
+    """Function of the output layer, by default sums over bond dimension"""
 
     # Dimensions:
     # - B = batch size
@@ -94,7 +96,7 @@ class ARqGPSFull(AbstractARqGPS):
         log_psi_symm = log_psi_symm_re+1j*log_psi_symm_im
         return log_psi_symm # (B,)
 
-def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable) -> Union[Array, Array]:
+def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable, out_transformation: Callable) -> Union[Array, Array]:
     # Slice inputs at index-1 to count previous spins
     inputs_i = inputs[:, index-1] # (B,)
 
@@ -115,7 +117,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: A
     site_prod = input_param * context_prod # (B, D, M)
 
     # Compute log conditional probabilities
-    log_psi = jnp.sum(site_prod, axis=-1) # (B, D)
+    log_psi = out_transformation(site_prod) # (B, D)
 
     # Update spins count if index is larger than 0, otherwise leave as is
     n_spins = gpu_cond(
@@ -149,7 +151,7 @@ def _conditional(model: ARqGPSFull, inputs: Array, index: int) -> Array:
         n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
 
     # Compute log conditional probabilities
-    n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
+    n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
     log_psi = _normalize(log_psi, model.machine_pow)
 
     # Update model cache
@@ -160,7 +162,7 @@ def _conditional(model: ARqGPSFull, inputs: Array, index: int) -> Array:
 def _conditionals(model: ARqGPSFull, inputs: Array) -> Array:
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(n_spins, index):
-        n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi)
+        n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
         n_spins = gpu_cond(
             model.hilbert.constrained,
             lambda n_spins: n_spins,

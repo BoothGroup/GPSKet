@@ -39,6 +39,8 @@ class ARPlaquetteqGPS(AbstractARqGPS):
     # TODO: extend to cases where total_sz != 0
     renormalize_log_psi: Callable = lambda n_spins, hilbert, index: jnp.log(jnp.heaviside(hilbert.size//2-n_spins, 0))
     """Function to renormalize conditional log probabilities"""
+    out_transformation: Callable=lambda argument: jnp.sum(argument, axis=-1)
+    """Function of the output layer, by default sums over bond dimension"""
 
     # Dimensions:
     # - B = batch size
@@ -97,7 +99,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
             log_psi_symm = log_psi_symm+1j*log_psi_symm_im
         return log_psi_symm # (B,)
 
-def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, mask: Array, plaquette: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable) -> Union[Array, Array]:
+def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, mask: Array, plaquette: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable, out_transformation: Callable) -> Union[Array, Array]:
     # Slice inputs at index-1 to count previous spins
     inputs_i = inputs[:, index-1] # (B,)
 
@@ -114,7 +116,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: A
     site_prod = input_param * context_prod # (B, D, M)
 
     # Compute log conditional probabilities
-    log_psi = jnp.sum(site_prod, axis=-1) # (B, D)
+    log_psi = out_transformation(site_prod) # (B, D)
 
     # Update spins count if index is larger than 0, otherwise leave as is
     n_spins = gpu_cond(
@@ -149,7 +151,7 @@ def _conditional(model: ARPlaquetteqGPS, inputs: Array, args: Tuple) -> Array:
 
     # Compute log conditional probabilities
     index, mask, plaquette = args
-    n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, mask, plaquette, inputs, index, model.count_spins, model.renormalize_log_psi)
+    n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, mask, plaquette, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
     log_psi = _normalize(log_psi, model.machine_pow)
 
     # Update model cache
@@ -161,7 +163,7 @@ def _conditionals(model: ARPlaquetteqGPS, inputs: Array) -> Array:
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(n_spins, args):
         index, mask, plaquette = args
-        n_spins, log_psi_cond = _compute_conditional(model.hilbert, n_spins, model._epsilon, mask, plaquette, inputs, index, model.count_spins, model.renormalize_log_psi)
+        n_spins, log_psi_cond = _compute_conditional(model.hilbert, n_spins, model._epsilon, mask, plaquette, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
         n_spins = gpu_cond(
             model.hilbert.constrained,
             lambda n_spins: n_spins,
