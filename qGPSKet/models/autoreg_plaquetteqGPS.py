@@ -94,9 +94,8 @@ class ARPlaquetteqGPS(AbstractARqGPS):
 
         # Compute symmetrized log-amplitudes
         log_psi_symm = (1/self.machine_pow)*logsumexp(self.machine_pow*log_psi.real, axis=-1, b=1/n_symm)
-        if jnp.issubdtype(self.dtype, jnp.complexfloating):
-            log_psi_symm_im = logsumexp(1j*log_psi.imag, axis=-1).imag
-            log_psi_symm = log_psi_symm+1j*log_psi_symm_im
+        log_psi_symm_im = logsumexp(1j*log_psi.imag, axis=-1).imag
+        log_psi_symm = log_psi_symm+1j*log_psi_symm_im
         return log_psi_symm # (B,)
 
 def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, mask: Array, plaquette: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable, out_transformation: Callable) -> Union[Array, Array]:
