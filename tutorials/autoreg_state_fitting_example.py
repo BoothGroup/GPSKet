@@ -43,6 +43,18 @@ def renormalize_log_psi_fermionic(n_spins, hilbert, index):
         lambda log_psi: log_psi,
         log_psi
     )
+    log_psi = jax.lax.cond(
+        (diff[0] >= (hilbert.size-index)).any(),
+        lambda log_psi: log_psi.at[2].set(-jnp.inf),
+        lambda log_psi: log_psi,
+        log_psi
+    )
+    log_psi = jax.lax.cond(
+        (diff[1] >= (hilbert.size-index)).any(),
+        lambda log_psi: log_psi.at[1].set(-jnp.inf),
+        lambda log_psi: log_psi,
+        log_psi
+    )
     return log_psi
 
 # Get dataset
