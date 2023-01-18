@@ -29,6 +29,8 @@ class ARPlaquetteqGPS(AbstractARqGPS):
     """Exponent required to normalize the output"""
     init_fun: NNInitFunc = normal(sigma=0.01)
     """Initializer for the variational parameters"""
+    normalize: bool=True
+    """Whether the Ansatz should be normalized"""
     to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
     """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
@@ -55,6 +57,8 @@ class ARPlaquetteqGPS(AbstractARqGPS):
         
         # Compute conditional probability for site at index
         log_psi = _conditional(self, inputs, args) # (B, D)
+        if self.normalize:
+            log_psi = _normalize(log_psi, self.machine_pow)
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
@@ -64,6 +68,8 @@ class ARPlaquetteqGPS(AbstractARqGPS):
         
         # Compute conditional probabilities for all sites
         log_psi = _conditionals(self, inputs) # (B, L, D)
+        if self.normalize:
+            log_psi = _normalize(log_psi, self.machine_pow)
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
@@ -86,6 +92,8 @@ class ARPlaquetteqGPS(AbstractARqGPS):
 
         # Compute conditional log-probabilities
         log_psi = jax.vmap(_conditionals, in_axes=(None, -1), out_axes=-1)(self, inputs) # (B, L, D, T)
+        if self.normalize:
+            log_psi = _normalize(log_psi, self.machine_pow, axis=-2)
 
         # Take conditionals along sites-axis according to input indices
         log_psi = jnp.take_along_axis(log_psi, jnp.expand_dims(inputs, axis=2), axis=2) # (B, L, 1, T)
@@ -151,7 +159,6 @@ def _conditional(model: ARPlaquetteqGPS, inputs: Array, args: Tuple) -> Array:
     # Compute log conditional probabilities
     index, mask, plaquette = args
     n_spins, log_psi = _compute_conditional(model.hilbert, n_spins, model._epsilon, mask, plaquette, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
-    log_psi = _normalize(log_psi, model.machine_pow)
 
     # Update model cache
     if model.has_variable("cache", "spins"):
@@ -182,5 +189,4 @@ def _conditionals(model: ARPlaquetteqGPS, inputs: Array) -> Array:
         (indices, masks, plaquettes)
     )
     log_psi = jnp.transpose(log_psi, [1, 0, 2])
-    log_psi = _normalize(log_psi, model.machine_pow)
     return log_psi # (B, L, D)

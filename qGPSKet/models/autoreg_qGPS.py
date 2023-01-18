@@ -93,6 +93,8 @@ class ARqGPS(AbstractARqGPS):
     """Exponent required to normalize the output"""
     init_fun: NNInitFunc = normal(sigma=0.01)
     """Initializer for the variational parameters"""
+    normalize: bool=True
+    """Whether the Ansatz should be normalized"""
     to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
     """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
@@ -119,6 +121,8 @@ class ARqGPS(AbstractARqGPS):
         
         # Compute conditional probability for site at index
         log_psi = _conditional(self, inputs, index) # (B, D)
+        if self.normalize:
+            log_psi = _normalize(log_psi, self.machine_pow)
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
@@ -128,6 +132,8 @@ class ARqGPS(AbstractARqGPS):
         
         # Compute conditional probabilities for all sites
         log_psi = _conditionals(self, inputs) # (B, L, D)
+        if self.normalize:
+            log_psi = _normalize(log_psi, self.machine_pow)
         p = jnp.exp(self.machine_pow*log_psi.real)
         return p
 
@@ -151,6 +157,8 @@ class ARqGPS(AbstractARqGPS):
 
         # Compute conditional log-probabilities
         log_psi = jax.vmap(_conditionals, in_axes=(None, -1), out_axes=-1)(self, inputs) # (B, L, D, T)
+        if self.normalize:
+            log_psi = _normalize(log_psi, self.machine_pow, axis=-2)
 
         # Take conditionals along sites-axis according to input indices
         log_psi = jnp.take_along_axis(log_psi, jnp.expand_dims(inputs, axis=2), axis=2) # (B, L, 1, T)
@@ -183,8 +191,8 @@ class ARqGPSModPhase(ARqGPS):
         return log_psi_mod + log_psi_phase*1j
 
 
-def _normalize(log_psi: Array, machine_pow: int) -> Array:
-    return log_psi - (1/machine_pow)*logsumexp(machine_pow*log_psi.real, axis=-1, keepdims=True)
+def _normalize(log_psi: Array, machine_pow: int, axis: int=-1) -> Array:
+    return log_psi - (1/machine_pow)*logsumexp(machine_pow*log_psi.real, axis=axis, keepdims=True)
 
 def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable, out_transformation: Callable) -> Union[Tuple, Array]:
     # Slice inputs at index-1 to get cached products
@@ -246,7 +254,6 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
     
     # Compute log conditional probabilities
     (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
-    log_psi = _normalize(log_psi, model.machine_pow)
     
     # Update model cache
     if model.has_variable("cache", "inputs"):
@@ -278,5 +285,4 @@ def _conditionals(model: ARqGPS, inputs: Array) -> Array:
         indices
     )
     log_psi = jnp.transpose(log_psi, [1, 0, 2])
-    log_psi = _normalize(log_psi, model.machine_pow)
     return log_psi # (B, L, D)
