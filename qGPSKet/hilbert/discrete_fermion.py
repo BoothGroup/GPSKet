@@ -11,17 +11,13 @@ import jax.numpy as jnp
 import netket as nk
 
 from netket.hilbert.custom_hilbert import HomogeneousHilbert
-from netket.hilbert._deprecations import graph_to_N_depwarn
-from netket.graph import AbstractGraph
 
 class FermionicDiscreteHilbert(HomogeneousHilbert):
     def __init__(
         self,
         N: int = 1,
-        n_elec: Optional[Tuple[int, int]] = None,
-        graph: Optional[AbstractGraph] = None
-    ):
-        N = graph_to_N_depwarn(N=N, graph=graph)
+        n_elec: Optional[Tuple[int, int]] = None
+        ):
         local_states = np.arange(4, dtype=np.uint8)
         local_states = local_states.tolist()
 
