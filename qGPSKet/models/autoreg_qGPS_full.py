@@ -65,7 +65,7 @@ class ARqGPSFull(AbstractARqGPS):
         return p
 
     def setup(self):
-        self._epsilon  = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, self.hilbert.size, self.hilbert.size), self.dtype)
+        self._epsilon  = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
         if self.hilbert.constrained:
             self._n_spins = self.variable("cache", "spins", zeros, None, (1, self.hilbert.local_size))
 
@@ -97,28 +97,29 @@ class ARqGPSFull(AbstractARqGPS):
         return log_psi_symm # (B,)
 
 def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: Array, inputs: Array, index: int, count_spins: Callable, renormalize_log_psi: Callable, out_transformation: Callable) -> Union[Array, Array]:
-    # Slice inputs at index-1 to count previous spins
-    inputs_i = inputs[:, index-1] # (B,)
-
-    # Mask out parameters at j>index
-    mask = jnp.triu(jnp.ones((hilbert.size, hilbert.size)), 1)
+    # Get the epsilon sub-tensor for the current index
+    lower_index = (index * (index+1))//2
+    local_epsilon = jax.lax.dynamic_slice_in_dim(epsilon, lower_index, hilbert.size, axis=-1)
 
     # Retrieve input parameters
-    input_param = jnp.asarray(epsilon, epsilon.dtype)[:, :, index, index] # (D, M)
+    input_param = local_epsilon[:, :, index]
     input_param = jnp.expand_dims(input_param, axis=0) # (1, D, M)
 
     # Compute product of parameters over j<index
-    context_param = jnp.asarray(epsilon, epsilon.dtype)[:, :, :, index] * mask[:,index] # (D, M, L)
-    context_param = jnp.expand_dims(context_param, axis=0) # (1, D, M, L)
-    inputs = jnp.expand_dims(inputs, axis=(1,2)) # (B, 1, 1, L)
-    context_val = jnp.take_along_axis(context_param, inputs, axis=1) # (B, 1, M, L)
-    context_val = jnp.where(context_val==0., jnp.ones((1,1,hilbert.size)), context_val)
+    context_param = jnp.expand_dims(local_epsilon, axis=0) # (1, D, M, L)
+    inputs_expanded = jnp.expand_dims(inputs, axis=(1,2)) # (B, 1, 1, L)
+    context_val = jnp.take_along_axis(context_param, inputs_expanded, axis=1) # (B, 1, M, L)
+    # Apply masking for sites > index
+    context_val = jnp.where(jnp.arange(hilbert.size) >= index, 1., context_val)
     context_prod = jnp.prod(context_val, axis=-1) # (B, 1, M)
+
     site_prod = input_param * context_prod # (B, D, M)
 
     # Compute log conditional probabilities
     log_psi = out_transformation(site_prod) # (B, D)
 
+    # Slice inputs at index-1 to count previous spins
+    inputs_i = inputs[:, index-1] # (B,)
     # Update spins count if index is larger than 0, otherwise leave as is
     n_spins = gpu_cond(
         index > 0,
