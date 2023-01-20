@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import netket as nk
-import qGPSKet as qk
+import GPSKet as qk
 from functools import partial
-from qGPSKet.datasets.h2o import BasisType
+from GPSKet.datasets.h2o import BasisType
 
 
 def count_spins_fermionic(spins):
@@ -61,7 +61,7 @@ def renormalize_log_psi_fermionic(n_spins, hilbert, index):
 dataset = qk.datasets.get_h2o_dataset(basis_type=BasisType.LOCAL, select_largest=500)
 
 # Setup Hilbert space and Hamiltonian
-_DATA = "/tmp/qGPSKet_data/"
+_DATA = "/tmp/GPSKet_data/"
 h1 = np.load(os.path.join(_DATA, f"h1_{BasisType.LOCAL}.npy"))
 h2 = np.load(os.path.join(_DATA, f"h2_{BasisType.LOCAL}.npy"))
 norb = dataset[0].shape[1]

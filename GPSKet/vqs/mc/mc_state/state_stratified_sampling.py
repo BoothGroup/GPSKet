@@ -1,6 +1,6 @@
 import numpy as np
 
-from qGPSKet.vqs.mc.mc_state.state_unique_samples import MCStateUniqueSamples
+from GPSKet.vqs.mc.mc_state.state_unique_samples import MCStateUniqueSamples
 
 import jax
 import jax.numpy as jnp

@@ -7,7 +7,7 @@ from netket.utils import HashableArray
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from jax.nn.initializers import zeros
-from qGPSKet.nn.initializers import normal
+from GPSKet.nn.initializers import normal
 from .autoreg_qGPS import AbstractARqGPS, gpu_cond, _normalize
 
 
@@ -54,7 +54,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
     def _conditional(self, inputs: Array, args: Tuple) -> Array:
         # Convert input configurations into indices
         inputs = self.to_indices(inputs) # (B, L)
-        
+
         # Compute conditional probability for site at index
         log_psi = _conditional(self, inputs, args) # (B, D)
         if self.normalize:
@@ -65,7 +65,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
     def conditionals(self, inputs: Array) -> Array:
         # Convert input configurations into indices
         inputs = self.to_indices(inputs) # (B, L)
-        
+
         # Compute conditional probabilities for all sites
         log_psi = _conditionals(self, inputs) # (B, L, D)
         if self.normalize:
@@ -134,7 +134,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, n_spins: Array, epsilon: A
     )
 
     # If Hilbert space associated with the model is constrained, i.e.
-    # model has "n_spins" in "cache" collection, then impose total magnetization.  
+    # model has "n_spins" in "cache" collection, then impose total magnetization.
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf

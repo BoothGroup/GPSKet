@@ -5,7 +5,7 @@ from netket.utils.types import Array
 from pyscf import scf, gto, ao2mo, fci, ci, lo
 
 
-_DATA = "/tmp/qGPSKet_data/"
+_DATA = "/tmp/GPSKet_data/"
 
 def _H2O_raw(basis, method, datapath):
     mol = gto.Mole()
@@ -96,7 +96,7 @@ def get_H2O_dataset(basis: str = 'CANONICAL', method: str = 'FCI', select_larges
     Return a dataset of configurations and amplitudes for the ground state of H2O computed with `method` in `basis`.
 
     Args:
-        basis : basis type in which the ground state is computed; currently supported: CANONICAL, LOCAL, BOYS and SPLIT (default: CANONICAL) 
+        basis : basis type in which the ground state is computed; currently supported: CANONICAL, LOCAL, BOYS and SPLIT (default: CANONICAL)
         method : method used to compute the ground state, either FCI or CISD (default: FCI)
         select_largest : number of configurations with largest probability returned (default: None)
         datapath : path to where the datasets and intermediate values are stored

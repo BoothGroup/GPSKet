@@ -10,8 +10,8 @@ from typing import Optional
 from functools import partial
 
 from netket.utils.types import DType
-from qGPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
-from qGPSKet.models import qGPS
+from GPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
+from GPSKet.models import qGPS
 
 class AbInitioHamiltonian(FermionicDiscreteOperator):
     def __init__(self, hilbert, h_mat, eri_mat):

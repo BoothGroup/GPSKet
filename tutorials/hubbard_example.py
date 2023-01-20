@@ -1,10 +1,10 @@
 import jax
 import jax.numpy as jnp
 import netket as nk
-from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
-from qGPSKet.sampler.fermionic_hopping import MetropolisHopping
-from qGPSKet.operator.hamiltonian import FermiHubbard
-from qGPSKet.models import ASymmqGPS
+from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
+from GPSKet.sampler.fermionic_hopping import MetropolisHopping
+from GPSKet.operator.hamiltonian import FermiHubbard
+from GPSKet.models import ASymmqGPS
 
 
 # Set up Hilbert space

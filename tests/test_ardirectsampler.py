@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import numpy as np
 import netket as nk
 from mpi4py import MPI
-from qGPSKet.models import ARqGPS
-from qGPSKet.sampler import ARDirectSampler
+from GPSKet.models import ARqGPS
+from GPSKet.sampler import ARDirectSampler
 
 
 # MPI variables
@@ -69,7 +69,7 @@ np.testing.assert_equal(samples.shape, (1, samples_per_rank, L))
 
 # Test #2
 # When sampling from a constrained Hilbert space,
-# autoregressive models should generate samples with 
+# autoregressive models should generate samples with
 # same total magnetization
 hi = nk.hilbert.Spin(s=1/2, N=g.n_nodes, total_sz=0)
 arqgps = ARqGPS(

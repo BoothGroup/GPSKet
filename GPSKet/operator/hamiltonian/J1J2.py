@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import netket as nk
 import netket.jax as nkjax
 from netket.vqs.mc.mc_state.state import MCState
-from qGPSKet.models import qGPS
-import qGPSKet.vqs.mc.mc_state.expect
+from GPSKet.models import qGPS
+import GPSKet.vqs.mc.mc_state.expect
 
 from typing import Optional
 

@@ -1,5 +1,5 @@
 import netket as nk
-from qGPSKet.hilbert import ASEPDiscreteHilbert
+from GPSKet.hilbert import ASEPDiscreteHilbert
 import jax
 
 import jax.numpy as jnp

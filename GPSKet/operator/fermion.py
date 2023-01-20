@@ -4,7 +4,7 @@ from numba import jit
 
 
 from netket.operator import DiscreteOperator
-from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
+from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 
 @jit(nopython=True)
 def apply_hopping(annihilate_site, create_site, x_prime, spin_int, cummulative_count=None):

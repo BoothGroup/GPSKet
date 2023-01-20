@@ -6,7 +6,7 @@ from tqdm import tqdm
 from scipy.linalg import circulant
 from jax.scipy.special import logsumexp
 from netket.utils import HashableArray
-from qGPSKet.models import ARPlaquetteqGPS
+from GPSKet.models import ARPlaquetteqGPS
 
 
 key_in, key_ma = jax.random.split(jax.random.PRNGKey(2))

@@ -3,10 +3,10 @@ import jax.numpy as jnp
 import netket as nk
 from scipy.sparse.linalg import eigs
 from netket.hilbert import Qubit
-from qGPSKet.operator.hamiltonian import AsymmetricSimpleExclusionProcess
-from qGPSKet.models import qGPS, ARqGPS
-from qGPSKet.sampler import ARDirectSampler
-from qGPSKet.nn import normal
+from GPSKet.operator.hamiltonian import AsymmetricSimpleExclusionProcess
+from GPSKet.models import qGPS, ARqGPS
+from GPSKet.sampler import ARDirectSampler
+from GPSKet.nn import normal
 
 
 # Set up Hilbert space

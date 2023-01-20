@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import netket as nk
-from qGPSKet.models import ASymmqGPS, ASymmqGPSProd, occupancies_to_electrons
-from qGPSKet.hilbert import FermionicDiscreteHilbert
+from GPSKet.models import ASymmqGPS, ASymmqGPSProd, occupancies_to_electrons
+from GPSKet.hilbert import FermionicDiscreteHilbert
 from tqdm import tqdm
 
 

@@ -6,7 +6,7 @@ from netket.utils import HashableArray
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from typing import Tuple, Union
 from netket.hilbert.homogeneous import HomogeneousHilbert
-from qGPSKet.nn.initializers import normal
+from GPSKet.nn.initializers import normal
 
 import warnings
 

@@ -1,6 +1,6 @@
 import numpy as np
 import netket as nk
-from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
+from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 import jax
 
 import jax.numpy as jnp

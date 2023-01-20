@@ -1,3 +1,3 @@
 from distutils.core import setup
 
-setup(name='qGPSKet', packages = ['qGPSKet'])
+setup(name='GPSKet', packages = ['GPSKet'])

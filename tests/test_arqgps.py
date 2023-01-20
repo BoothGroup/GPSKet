@@ -4,7 +4,7 @@ import numpy as np
 import netket as nk
 from tqdm import tqdm
 from jax.scipy.special import logsumexp
-from qGPSKet.models import ARqGPS
+from GPSKet.models import ARqGPS
 
 
 key_in, key_ma = jax.random.split(jax.random.PRNGKey(np.random.randint(0, 100)))

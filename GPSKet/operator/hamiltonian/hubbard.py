@@ -6,9 +6,9 @@ import netket.jax as nkjax
 from numba import jit
 from typing import List, Tuple, Union, Optional
 from netket.utils.types import DType
-from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
-from qGPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
-from qGPSKet.operator.hamiltonian.ab_initio import get_parity_multiplicator_hop
+from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
+from GPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
+from GPSKet.operator.hamiltonian.ab_initio import get_parity_multiplicator_hop
 
 
 class FermiHubbard(FermionicDiscreteOperator):
@@ -115,7 +115,7 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
         def get_hopping_term(spin_int, cumulative_count):
 
             def apply_hopping(annihilate_site, create_site):
-            
+
                 def hop(operands):
                     annihilate_site, create_site = operands
                     # Updated config at update sites
@@ -130,7 +130,7 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                     # Evaluate amplitude ratio
                     log_amp_connected = get_connected_log_amp(new_occ, update_sites)
                     amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
-                    
+
                     return parity_multiplicator*amp_ratio.astype(jnp.complex_)
 
                 def no_hop(operands):

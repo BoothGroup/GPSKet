@@ -7,8 +7,8 @@ from flax import linen as nn
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import NNInitFunc, Array, DType, Callable
 from jax.nn.initializers import zeros, ones
-from qGPSKet.nn.initializers import normal
-from qGPSKet.models import qGPS
+from GPSKet.nn.initializers import normal
+from GPSKet.models import qGPS
 
 
 def gpu_cond(pred, true_func, false_func, args):
@@ -118,7 +118,7 @@ class ARqGPS(AbstractARqGPS):
     def _conditional(self, inputs: Array, index: int) -> Array:
         # Convert input configurations into indices
         inputs = self.to_indices(inputs) # (B, L)
-        
+
         # Compute conditional probability for site at index
         log_psi = _conditional(self, inputs, index) # (B, D)
         if self.normalize:
@@ -129,7 +129,7 @@ class ARqGPS(AbstractARqGPS):
     def conditionals(self, inputs: Array) -> Array:
         # Convert input configurations into indices
         inputs = self.to_indices(inputs) # (B, L)
-        
+
         # Compute conditional probabilities for all sites
         log_psi = _conditionals(self, inputs) # (B, L, D)
         if self.normalize:
@@ -175,7 +175,7 @@ class ARqGPSModPhase(ARqGPS):
     """
     Implements an Ansatz composed of an autoregressive qGPS for the modulus of the amplitude and a qGPS for the phase.
     """
-    
+
     def setup(self):
         assert jnp.issubdtype(self.dtype, jnp.floating)
         super().setup()
@@ -225,7 +225,7 @@ def _compute_conditional(hilbert: HomogeneousHilbert, cache: Array, n_spins: Arr
     )
 
     # If Hilbert space associated with the model is constrained, i.e.
-    # model has "n_spins" in "cache" collection, then impose total magnetization.  
+    # model has "n_spins" in "cache" collection, then impose total magnetization.
     # This is done by counting number of up/down spins until index, then if
     # n_spins is >= L/2 the probability of up/down spin at index should be 0,
     # i.e. the log probability becomes -inf
@@ -251,10 +251,10 @@ def _conditional(model: ARqGPS, inputs: Array, index: int) -> Array:
         n_spins = jnp.resize(n_spins, (batch_size, model.hilbert.local_size)) # (B, D)
     else:
         n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
-    
+
     # Compute log conditional probabilities
     (cache, n_spins), log_psi = _compute_conditional(model.hilbert, cache, n_spins, model._epsilon, inputs, index, model.count_spins, model.renormalize_log_psi, model.out_transformation)
-    
+
     # Update model cache
     if model.has_variable("cache", "inputs"):
         model._cache.value = cache

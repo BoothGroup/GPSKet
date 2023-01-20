@@ -1,13 +1,13 @@
 import netket as nk
-import qGPSKet.models as qGPS
+import GPSKet.models as qGPS
 
 import numpy as np
 
-from qGPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
-from qGPSKet.sampler.fermionic_hopping import MetropolisHopping, MetropolisFastHopping
-from qGPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonian, AbInitioHamiltonianOnTheFly
+from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
+from GPSKet.sampler.fermionic_hopping import MetropolisHopping, MetropolisFastHopping
+from GPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonian, AbInitioHamiltonianOnTheFly
 
-from qGPSKet.models import qGPS
+from GPSKet.models import qGPS
 
 from pyscf import scf, gto, ao2mo, fci, lo
 from pyscf.tools import ring
@@ -18,7 +18,7 @@ import jax.numpy as jnp
 """
 This first bit just sets up the Hamiltonian with PySCF.
 In particular it gives us the 1 and 2 electron integrals (h1 and h2) which are required to set up the ab-initio
-Hamiltonian with qGPSKet/NetKet.
+Hamiltonian with GPSKet/NetKet.
 The Hamiltonian is either represented in a canonical or a "local" orbital basis.
 """
 local_basis = False
@@ -74,7 +74,7 @@ gs_energy = energy_mo + nuc_en
 
 
 """
-This is the qGPSKet/NetKet bit of the calculation.
+This is the GPSKet/NetKet bit of the calculation.
 The key elements different from standard netket calculations are:
 1.) Setting up a fermionic discrete Hilbert space:
     In this Hilbert space configurations are represented as a list of L 8-bit integers

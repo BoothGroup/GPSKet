@@ -3,7 +3,7 @@ from numba import jit
 from netket.utils.types import DType
 from netket.operator import DiscreteOperator
 from netket.hilbert import Qubit
-from qGPSKet.operator.asep import apply_creation, apply_annihilation, apply_hopping, apply_particle_hole
+from GPSKet.operator.asep import apply_creation, apply_annihilation, apply_hopping, apply_particle_hole
 
 class AsymmetricSimpleExclusionProcess(DiscreteOperator):
     def __init__(self, hilbert: Qubit, lambd: float = 0.0, alpha: float = 0.5, beta: float = 0.5, gamma: float = 0.5, delta: float = 0.5, p: float = 0.5, q: float = 0.5):

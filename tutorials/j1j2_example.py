@@ -1,10 +1,10 @@
 import jax.numpy as jnp
 import netket as nk
 from mpi4py import MPI
-from qGPSKet.operator.hamiltonian import get_J1_J2_Hamiltonian
-from qGPSKet.models import qGPS, ARqGPS, get_sym_transformation_spin
-from qGPSKet.sampler import ARDirectSampler
-from qGPSKet.sampler.metropolis_fast import MetropolisFastExchange
+from GPSKet.operator.hamiltonian import get_J1_J2_Hamiltonian
+from GPSKet.models import qGPS, ARqGPS, get_sym_transformation_spin
+from GPSKet.sampler import ARDirectSampler
+from GPSKet.sampler.metropolis_fast import MetropolisFastExchange
 
 # MPI variables
 comm = MPI.COMM_WORLD.Create(MPI.COMM_WORLD.Get_group())

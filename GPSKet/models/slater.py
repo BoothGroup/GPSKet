@@ -3,7 +3,7 @@ import numpy as np
 import jax.numpy as jnp
 from flax import linen as nn
 from typing import Tuple, Union, Optional
-from qGPSKet.hilbert import FermionicDiscreteHilbert
+from GPSKet.hilbert import FermionicDiscreteHilbert
 from netket.utils.types import Array, Callable, DType, NNInitFunc
 from netket.utils import HashableArray
 from functools import partial

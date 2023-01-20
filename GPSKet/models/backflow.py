@@ -5,8 +5,8 @@ import flax.linen as nn
 from jax.scipy.special import logsumexp
 from netket.utils import HashableArray
 from netket.utils.types import Array, Callable
-from qGPSKet.hilbert import FermionicDiscreteHilbert
-from qGPSKet.models import occupancies_to_electrons
+from GPSKet.hilbert import FermionicDiscreteHilbert
+from GPSKet.models import occupancies_to_electrons
 
 
 class Backflow(nn.Module):
@@ -54,7 +54,7 @@ class Backflow(nn.Module):
         if self.fixed_magnetization:
             y_up, y_dn = jnp.split(y, np.array([nelec[0]]), axis=1)
             if self.spin_symmetry_by_structure:
-                ɸ_up = jnp.take_along_axis(jnp.expand_dims(orbitals, axis=(0,-1)), y_up, axis=1) 
+                ɸ_up = jnp.take_along_axis(jnp.expand_dims(orbitals, axis=(0,-1)), y_up, axis=1)
                 ɸ_dn = jnp.take_along_axis(jnp.expand_dims(orbitals, axis=(0,-1)), y_dn, axis=1)
                 Δ_up = jnp.take_along_axis(corrections, y_up, axis=1)
                 Δ_dn = jnp.take_along_axis(corrections, y_dn, axis=1)

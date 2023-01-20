@@ -5,10 +5,10 @@ from typing import Union
 from netket.utils.types import DType, NNInitFunc, Callable, Array
 from flax import linen as nn
 from netket.hilbert.homogeneous import HomogeneousHilbert
-from qGPSKet.nn.initializers import normal
+from GPSKet.nn.initializers import normal
 from jax.nn.initializers import zeros
 from .autoreg_qGPS import _normalize, gpu_cond, AbstractARqGPS
-from qGPSKet.models import qGPS
+from GPSKet.models import qGPS
 
 
 class ARqGPSFull(AbstractARqGPS):
