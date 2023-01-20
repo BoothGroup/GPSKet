@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 @nk.hilbert.random.random_state.dispatch
 def random_state(hilb: FermionicDiscreteHilbert, key, batches: int, *, dtype=jnp.uint8):
-    shape = (batches, hilb._size)
+    shape = (batches, hilb.size)
 
     if hilb._n_elec is None:
         out = jax.random.choice(key, jnp.array(hilb.local_states), shape=shape)
