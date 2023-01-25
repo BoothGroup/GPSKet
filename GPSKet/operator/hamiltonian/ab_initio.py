@@ -191,9 +191,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
             sections[batch_id] = c
         return x_prime, mels
 
-""" Wrapper class which can be used to apply the on-the-fly updating,
-also includes another flag specifying if fast updating should be applied or not.
-"""
+""" Wrapper class which can be used to apply the on-the-fly updating"""
 class AbInitioHamiltonianOnTheFly(AbInitioHamiltonian):
     pass
 
