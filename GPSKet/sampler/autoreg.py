@@ -100,7 +100,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
             cache = mutables["cache"]
         else:
             cache = None
-        
+
         local_states = jnp.asarray(sampler.hilbert.local_states, dtype=sampler.dtype)
         new_σ = batch_choice(key, local_states, p)
         if hasattr(model, 'plaquettes'):
@@ -139,7 +139,12 @@ def _sample_chain(sampler, model, variables, state, chain_length):
     )
 
     # Apply symmetries
-    σ = model.apply_symmetries(σ) # (B, L, T)
+    if type(model.apply_symmetries) == tuple:
+        syms = model.apply_symmetries[0]
+    else:
+        syms = model.apply_symmetries
+
+    σ = syms(σ) # (B, L, T)
 
     # Sample transformations uniformly
     r = jax.random.randint(key_symm, shape=(batch_size,), minval=0, maxval=σ.shape[-1])
