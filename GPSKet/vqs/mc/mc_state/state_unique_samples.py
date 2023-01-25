@@ -38,10 +38,11 @@ of expectation values can be trusted and sampler properties and variances are pr
 approach is just hacked into the code with the least possible overhead.
 """
 class MCStateUniqueSamples(nk.vqs.MCState):
-    def __init__(self, *args, max_sampling_steps=None, fill_with_random=False, **kwargs):
+    def __init__(self, *args, max_sampling_steps=None, batch_size=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_sampling_steps = max_sampling_steps
-        self.fill_with_random = fill_with_random
+        if batch_size is None:
+            self.batch_size = self.n_samples
 
     def reset(self):
         self._samples = None
@@ -55,16 +56,6 @@ class MCStateUniqueSamples(nk.vqs.MCState):
     @property
     def samples_with_counts(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
         if self._unique_samples is None:
-            """
-            We constructs and synchronize arrays of all samples,
-            including the dictionary used for the counting across the mpi ranks.
-            This is a little bit inelegant and should maybe be improved.
-            """
-
-            # Relevant range of samples for this rank
-            start_id = _rank * self.n_samples_per_rank
-            end_id = start_id + self.n_samples_per_rank
-
             unique_samps = defaultdict(lambda: 0)
             count = 0
             continue_sampling = True
@@ -73,30 +64,34 @@ class MCStateUniqueSamples(nk.vqs.MCState):
                 if self.max_sampling_steps <= count:
                     continue_sampling = False
 
+            # Generate a batch of samples
+            samps = self.sample(n_samples = self.batch_size)
 
-            samps = self.sample()
             while(continue_sampling):
-                samps_np = np.asarray(samps.reshape((-1, samps.shape[-1])))
+                # Make unique
+                local_batch, local_batch_count = np.unique(np.asarray(samps.reshape((-1, samps.shape[-1]))), return_counts=True, axis=0)
 
-                """
-                Merge the samples from all mpi processes. This can certainly be
-                done better (e.g. by only synchronizing the hashes and not the full samples).
-                TODO: improve
-                """
-                all_samples = np.zeros((self.n_samples, samps_np.shape[-1]), dtype=samps_np.dtype)
-                np.copyto(all_samples[start_id:end_id], samps_np)
+                # Merge the samples from all mpi processes
+                all_samples = np.zeros((_mpi_sum(local_batch.shape[0]), local_batch.shape[-1]), dtype=local_batch.dtype)
+                all_counts = np.zeros(_mpi_sum(local_batch.shape[0]), dtype=int)
 
+                # Get the local ids into the arrays to populate the full arrays above
+                counts = np.zeros(_n_nodes, dtype=int)
+                counts[_rank] = local_batch.shape[0]
+                counts = _mpi_sum(counts)
+
+                start_id = np.sum(counts[:_rank])
+                end_id = start_id + counts[_rank]
+                np.copyto(all_samples[start_id:end_id], local_batch)
+                np.copyto(all_counts[start_id:end_id], local_batch_count)
+
+                # Synchronize across ranks
                 all_samples = _mpi_sum(all_samples)
+                all_counts = _mpi_sum(all_counts)
 
-                """
-                Now count the number of unique samples,
-                TODO: make this more efficient, e.g. using np.unique.
-                """
-                for samp in all_samples:
-                    unique_samps[tuple(samp)] += 1
-                    if len(unique_samps) == self.n_samples:
-                        break
-                count += 1
+                # Add to the previously sampled configurations
+                for (i, samp) in enumerate(all_samples):
+                    unique_samps[tuple(samp)] += all_counts[i]
 
                 if self.max_sampling_steps is not None:
                     if self.max_sampling_steps <= count:
@@ -104,32 +99,22 @@ class MCStateUniqueSamples(nk.vqs.MCState):
                 if len(unique_samps) >= self.n_samples:
                     continue_sampling = False
                 if continue_sampling:
-                    samps = self.sample(n_discard_per_chain=0)
+                    samps = self.sample(n_samples = self.batch_size, n_discard_per_chain=0)
 
-            unique_samples = np.zeros((self.n_samples, samps.shape[-1]), dtype=np.array(samps).dtype)
-            relative_counts = np.zeros(unique_samples.shape[0])
+                count += 1
 
-            if len(unique_samps) > 0:
-                np.copyto(unique_samples, all_samples)
-                np.copyto(unique_samples[:len(unique_samps), :], np.array(list(unique_samps.keys()), dtype=np.array(samps).dtype))
-                np.copyto(relative_counts[:len(unique_samps)], np.array(list(unique_samps.values()), dtype=float))
-            else:
-                assert(self.fill_with_random)
+            unique_samples = np.tile(all_samples[0], (self.n_samples, 1))
+            relative_counts = np.zeros(self.n_samples, dtype=float)
 
-            if self.fill_with_random:
-                synced_key = _mpi_sum_jax(self.sampler_state.rng)[0]
-                added_samples = self.sampler.hilbert.random_state(synced_key, size=(self.n_samples - len(unique_samps)), dtype=samps.dtype)
-                np.copyto(unique_samples[len(unique_samps):, :], np.array(added_samples))
-                log_probs = 2*self.log_value(added_samples).real
-                log_probs = log_probs-_mpi_max_jax(jnp.max(log_probs))[0]
-                probs_added = jnp.exp(log_probs)
-                if len(unique_samps) > 0:
-                    probs_added *= jnp.sum(relative_counts[:len(unique_samps)])/jnp.sum(probs_added) # 50:50 split
-                np.copyto(relative_counts[len(unique_samps):], np.array(probs_added))
+            max_id = min(len(unique_samps), self.n_samples)
+            np.copyto(unique_samples[:max_id, :], np.array(list(unique_samps.keys()), dtype=unique_samples.dtype)[:max_id, :])
+            np.copyto(relative_counts[:max_id], np.array(list(unique_samps.values()), dtype=relative_counts.dtype)[:max_id])
 
             # Split samples and counts across mpi processes
-            self._unique_samples = jnp.array(unique_samples[start_id:end_id, :])
-            self._relative_counts = jnp.array(relative_counts[start_id:end_id])
+            lower = _rank * self.n_samples_per_rank
+            upper = lower + self.n_samples_per_rank
+            self._unique_samples = jnp.array(unique_samples[lower:upper, :])
+            self._relative_counts = jnp.array(relative_counts[lower:upper])
 
             self._relative_counts /= _sum(self._relative_counts)
 
