@@ -78,8 +78,9 @@ class ARqGPSFull(AbstractARqGPS):
 
     def setup(self):
         self._epsilon  = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
-        self._saved_configs = self.variable("intermediates_cache", "samples", lambda : None)
-        self._saved_context_product = self.variable("intermediates_cache", "context_prod", lambda : None)
+        if self.apply_fast_update:
+            self._saved_configs = self.variable("intermediates_cache", "samples", lambda : None)
+            self._saved_context_product = self.variable("intermediates_cache", "context_prod", lambda : None)
         if self.hilbert.constrained:
             self._n_spins = self.variable("cache", "spins", zeros, None, (1, self.hilbert.local_size))
         if self.apply_fast_update:
