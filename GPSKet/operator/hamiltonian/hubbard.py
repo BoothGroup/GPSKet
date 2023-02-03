@@ -90,8 +90,8 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
         sample = jnp.asarray(sample, np.uint8)
         is_occ_up = (sample & 1)
         is_occ_down = (sample & 2) >> 1
-        up_count = jnp.cumsum(is_occ_up, dtype=np.uint8)
-        down_count = jnp.cumsum(is_occ_down, dtype=np.uint8)
+        up_count = jnp.cumsum(is_occ_up, dtype=int)
+        down_count = jnp.cumsum(is_occ_down, dtype=int)
 
         # Compute log_amp of sample
         if use_fast_update:
