@@ -5,244 +5,81 @@ import jax
 from numba import jit
 import netket.jax as nkjax
 
-from GPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonian
-
 from typing import Optional
 
 from functools import partial
+
+from GPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonianOnTheFly, get_parity_multiplicator_hop
 
 from netket.utils.types import DType
 from GPSKet.operator.fermion import FermionicDiscreteOperator, apply_hopping
 from GPSKet.models import qGPS
 
-class AbInitioHamiltonianSparse(AbInitioHamiltonian):
+class AbInitioHamiltonianSparse(AbInitioHamiltonianOnTheFly):
+    """ Implementation of an ab initio Hamiltonian utilizing sparse structure in the
+    one- and two-electron integrals. If a localized basis is used, this gives a reduction to O(N^2)
+    terms which need to be evaluated for each local energy. Currently, the sparse structure is set
+    up in the constructor resulting in a bit of memory overhead.
+    TODO: Improve memory footprint.
+    """
     def __init__(self, hilbert, h_mat, eri_mat):
-        super(AbInitioHamiltonian, self).__init__(hilbert)
+        super().__init__(hilbert, h_mat, eri_mat)
 
-        if h_mat is not None:
-            assert(self.hilbert.size == h_mat.shape[0] == h_mat.shape[1])
+        # Set up the sparse structure
 
-            non_zero = np.sum(h_mat != 0.)
-            self.h_nonzero_inds = np.zeros(non_zero, dtype=int)
-            self.h_nonzero_vals = np.zeros(non_zero, dtype=h_mat.dtype)
-            self.h_nonzero_secs = np.zeros(self.hilbert.size+1, dtype=int)
+        """
+        Start/end ids into the flattened arrays holding the nonzero
+        orbital ids and values for each first index into the one-electron array
+        start_id[i] = self.h1_nonzero_start[i]
+        end_id[i] = self.h1_nonzero_start[i+1]
+        non_zero_ids(i) = non_zero_ids_flattened[start_id[i]:end_id[i]]
+        non_zero_vals(i) = non_zero_vals_flattened[start_id[i]:end_id[i]]
+        """
+        self.h1_nonzero_range = np.zeros(self.h_mat.shape[0]+1, dtype=int)
+        self.h1_nonzero_ids_flat = np.zeros(0, dtype=int)
+        self.h1_nonzero_vals_flat = np.zeros(0, dtype=self.h_mat.dtype)
 
-            count = 0
-            for j in range(self.hilbert.size):
-                nonzeros = h_mat[j,:].nonzero()[0]
-                self.h_nonzero_inds[count:(count+len(nonzeros))] = nonzeros
-                self.h_nonzero_vals[count:(count+len(nonzeros))] = h_mat[j, nonzeros]
-                self.h_nonzero_secs[j+1] = self.h_nonzero_secs[j] + len(nonzeros)
-                count += len(nonzeros)
+        # Construct flattened arrays
+        for i in range(self.h_mat.shape[0]):
+            nonzeros = np.nonzero(self.h_mat[i,:])[0]
+            self.h1_nonzero_range[i+1] = self.h1_nonzero_range[i] + len(nonzeros)
+            self.h1_nonzero_ids_flat = np.append(self.h1_nonzero_ids_flat, nonzeros)
+            self.h1_nonzero_vals_flat = np.append(self.h1_nonzero_vals_flat, self.h_mat[i,nonzeros])
 
-            self.h_nonzero_inds = jnp.array(self.h_nonzero_inds)
-            self.h_nonzero_vals = jnp.array(self.h_nonzero_vals)
-            self.h_nonzero_secs = jnp.array(self.h_nonzero_secs)
-        else:
-            self.h_nonzero_inds = None
-            self.h_nonzero_vals = None
-            self.h_nonzero_secs = None
+        """
+        Start/end ids into the flattened arrays holding the nonzero
+        orbital ids and values for each (i,j) index pair into the eri array (indexed as eri[i,a,j,b])
+        start_id[i,j] = self.h2_nonzero_start[i, j]
+        end_id[i,j] = self.h2_nonzero_start[i, j+1]
+        non_zero_ids(i,j) = non_zero_ids_flattened[start_id[i,j]:end_id[i,j]] -> index pair(a,b)
+        non_zero_vals(i,j) = non_zero_vals_flattened[start_id[i,j]:end_id[i,j]]
+        """
+        self.h2_nonzero_range = np.zeros((self.eri_mat.shape[0], self.eri_mat.shape[2]+1), dtype=int)
+        self.h2_nonzero_ids_flat = np.zeros((0,2), dtype=int)
+        self.h2_nonzero_vals_flat = np.zeros(0, dtype=self.eri_mat.dtype)
 
-        if eri_mat is not None:
-            assert(self.hilbert.size == eri_mat.shape[0] == eri_mat.shape[1] == eri_mat.shape[2] == eri_mat.shape[3])
+        # Construct flattened arrays
+        for i in range(self.eri_mat.shape[0]):
+            for j in range(self.eri_mat.shape[2]):
+                nonzeros = np.array(np.nonzero(self.eri_mat[i,:, j, :]))
+                self.h2_nonzero_range[i,j+1] = self.h2_nonzero_range[i,j] + nonzeros.shape[1]
+                if j == self.eri_mat.shape[2]-1 and i != self.eri_mat.shape[0]-1:
+                    self.h2_nonzero_range[i+1,0] = self.h2_nonzero_range[i,j] + nonzeros.shape[1]
+                self.h2_nonzero_ids_flat = np.append(self.h2_nonzero_ids_flat, nonzeros.T, axis=0)
+                self.h2_nonzero_vals_flat = np.append(self.h2_nonzero_vals_flat, self.eri_mat[i,nonzeros[0,:], j, nonzeros[1,:]])
 
-            non_zero = np.sum(eri_mat != 0.)
-            self.eri_nonzero_inds = np.zeros((non_zero,2), dtype=int)
-            self.eri_nonzero_vals = np.zeros(non_zero, dtype=eri_mat.dtype)
-            self.eri_nonzero_secs = np.zeros(self.hilbert.size**2+1, dtype=int)
+def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
+    h1_nonzero_range = args[0]
+    h1_nonzero_ids_flat = args[1]
+    h1_nonzero_vals_flat = args[2]
 
-            count = 0
-            for j in range(self.hilbert.size):
-                for i in range(self.hilbert.size):
-                    nonzeros = np.array(eri_mat[:,i,:,j].nonzero()).T
-                    self.eri_nonzero_inds[count:(count+nonzeros.shape[0]), :] = nonzeros
-                    self.eri_nonzero_vals[count:(count+nonzeros.shape[0])] = eri_mat[nonzeros[:,0],i,nonzeros[:,1],j]
-                    self.eri_nonzero_secs[j*self.hilbert.size + i + 1] = self.eri_nonzero_secs[j*self.hilbert.size + i] + nonzeros.shape[0]
-                    count += nonzeros.shape[0]
+    h2_nonzero_range = args[3]
+    h2_nonzero_ids_flat = args[4]
+    h2_nonzero_vals_flat = args[5]
 
-            self.eri_nonzero_inds = jnp.array(self.eri_nonzero_inds)
-            self.eri_nonzero_vals = jnp.array(self.eri_nonzero_vals)
-            self.eri_nonzero_secs = jnp.array(self.eri_nonzero_secs)
-        else:
-            self.eri_nonzero_inds = None
-            self.eri_nonzero_vals = None
-            self.eri_nonzero_secs = None
-
-    """
-    This is really only for testing purposes, expectation value automatically
-    applies code below.
-    """
-    def get_conn_flattened(self, x, sections, pad=True):
-        assert(not pad or self.hilbert._has_constraint)
-
-        x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8), sections, np.array(self.h_nonzero_vals),
-                                                         np.array(self.h_nonzero_inds), np.array(self.h_nonzero_secs),
-                                                         np.array(self.eri_nonzero_vals), np.array(self.eri_nonzero_inds),
-                                                         np.array(self.eri_nonzero_secs))
-
-        return x_primes, mels
-
-    @staticmethod
-    @jit(nopython=True)
-    def _get_conn_flattened_kernel(x, sections, h, h_nz, h_nz_secs, eri, eri_nz, eri_nz_secs):
-        range_indices = np.arange(x.shape[-1])
-
-        x_prime = np.empty((0, x.shape[1]), dtype=np.uint8)
-        mels = np.empty(0, dtype=np.complex128)
-
-        n_orbs = x.shape[-1]
-
-        c = 0
-        for batch_id in range(x.shape[0]):
-            is_occ_up = (x[batch_id] & 1).astype(np.bool8)
-            is_occ_down = (x[batch_id] & 2).astype(np.bool8)
-
-            up_count = np.cumsum(is_occ_up)
-            down_count = np.cumsum(is_occ_down)
-
-            is_empty_up = ~is_occ_up
-            is_empty_down = ~is_occ_down
-
-            up_occ_inds = range_indices[is_occ_up]
-            down_occ_inds = range_indices[is_occ_down]
-            up_unocc_inds = range_indices[is_empty_up]
-            down_unocc_inds = range_indices[is_empty_down]
-
-            connected_con = len(up_occ_inds) * x.shape[1]
-            connected_con += len(down_occ_inds) * x.shape[1]
-            connected_con += len(down_occ_inds) * (len(down_occ_inds)-1) * x.shape[1] * x.shape[1]
-            connected_con += len(up_occ_inds) * (len(up_occ_inds)-1) * x.shape[1] * x.shape[1]
-            connected_con += len(up_occ_inds) * len(down_occ_inds) * x.shape[1] * x.shape[1]
-            end_val = c + connected_con
-
-            x_conn = np.empty((connected_con, x.shape[1]), dtype=np.uint8)
-            x_conn[:,:] = x[batch_id,:]
-            x_prime = np.append(x_prime, x_conn, axis=0)
-            mels = np.append(mels, np.zeros(connected_con))
-
-            # One-body parts
-            for i in up_occ_inds:
-                for k in range(h_nz_secs[i], h_nz_secs[i+1]):
-                    a = h_nz[k]
-                    x_prime[c, :] = x[batch_id, :]
-                    multiplicator = apply_hopping(i, a, x_prime[c], 1,
-                                                  cummulative_count=up_count)
-                    mels[c] = multiplicator * h[k]
-                    c += 1
-            for i in down_occ_inds:
-                for k in range(h_nz_secs[i], h_nz_secs[i+1]):
-                    a = h_nz[k]
-                    x_prime[c, :] = x[batch_id, :]
-                    multiplicator = apply_hopping(i, a, x_prime[c], 2,
-                                                  cummulative_count=down_count)
-                    mels[c] = multiplicator * h[k]
-                    c += 1
-
-            # Two body parts
-            for i in up_occ_inds:
-                parity_count_i = (up_count[i]-1)
-                for j in up_occ_inds:
-                    if j != i:
-                        parity_count_j = (parity_count_i + up_count[j] - 1)
-                        if j > i:
-                            parity_count_j = parity_count_j - 1
-                        for k in range(eri_nz_secs[j*n_orbs+i], eri_nz_secs[j*n_orbs+i+1]):
-                            a = eri_nz[k, 1]
-                            b = eri_nz[k, 0]
-                            parity_count = parity_count_j + up_count[a] + up_count[b]
-                            parity_count -= int(a >= j) + int(a >= i) + int(b >= j) + int(b >= i)
-                            parity_count += int(b >= a)
-                            if parity_count & 1:
-                                multiplicator = -1
-                            else:
-                                multiplicator = 1
-                            x_prime[c, :] = x[batch_id, :]
-                            x_prime[c, i] -= 1
-                            x_prime[c, j] -= 1
-                            if x_prime[c, a] & 1:
-                                multiplicator *= 0
-                            else:
-                                x_prime[c, a] += 1
-                                if x_prime[c, b] & 1:
-                                    multiplicator *= 0
-                                else:
-                                    x_prime[c, b] += 1
-                            mels[c] = 0.5 * multiplicator * eri[k]
-                            c += 1
-
-            for i in down_occ_inds:
-                parity_count_i = (down_count[i]-1)
-                for j in down_occ_inds:
-                    if j != i:
-                        parity_count_j = (parity_count_i + down_count[j] - 1)
-                        if j > i:
-                            parity_count_j = parity_count_j - 1
-                        for k in range(eri_nz_secs[j*n_orbs+i], eri_nz_secs[j*n_orbs+i+1]):
-                            a = eri_nz[k, 1]
-                            b = eri_nz[k, 0]
-                            parity_count = parity_count_j + down_count[a] + down_count[b]
-                            parity_count -= int(a >= j) + int(a >= i) + int(b >= j) + int(b >= i)
-                            parity_count += int(b >= a)
-                            if parity_count & 1:
-                                multiplicator = -1
-                            else:
-                                multiplicator = 1
-                            x_prime[c, :] = x[batch_id, :]
-                            x_prime[c, i] -= 2
-                            x_prime[c, j] -= 2
-                            if x_prime[c, a] & 2:
-                                multiplicator *= 0
-                            else:
-                                x_prime[c, a] += 2
-                                if x_prime[c, b] & 2:
-                                    multiplicator *= 0
-                                else:
-                                    x_prime[c, b] += 2
-                            mels[c] = 0.5 * multiplicator * eri[k]
-                            c += 1
-
-            for i in up_occ_inds:
-                parity_count_i = (up_count[i]-1)
-                for j in down_occ_inds:
-                    parity_count_j = parity_count_i + down_count[j] - 1
-                    for k in range(eri_nz_secs[j*n_orbs+i], eri_nz_secs[j*n_orbs+i+1]):
-                        a = eri_nz[k, 1]
-                        b = eri_nz[k, 0]
-                        parity_count = parity_count_j + down_count[a] + up_count[b]
-                        parity_count -= int(a >= j) + int(b >= i)
-                        if parity_count & 1:
-                            multiplicator = -1
-                        else:
-                            multiplicator = 1
-
-                        x_prime[c, :] = x[batch_id, :]
-                        x_prime[c, i] -= 1
-                        x_prime[c, j] -= 2
-                        if x_prime[c, a] & 2:
-                            multiplicator = 0
-                        else:
-                            x_prime[c, a] += 2
-                            if x_prime[c, b] & 1:
-                                multiplicator = 0
-                            else:
-                                x_prime[c, b] += 1
-                        mels[c] = multiplicator * eri[k]
-                        c += 1
-            c = end_val
-            sections[batch_id] = c
-        return x_prime, mels
-
-def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
-    h = args[0]
-    h_nonzero_inds = args[1]
-    h_nonzero_secs = args[2]
-    eri = args[3]
-    eri_nonzero_inds = args[4]
-    eri_nonzero_secs = args[5]
-
-    n_orbs = samples.shape[-1]
-
+    n_sites = samples.shape[-1]
     def vmap_fun(sample):
+        sample = jnp.asarray(sample, jnp.uint8)
         is_occ_up = (sample & 1)
         is_occ_down = (sample & 2) >> 1
         up_count = jnp.cumsum(is_occ_up, dtype=int)
@@ -250,36 +87,10 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
         is_empty_up = 1 >> is_occ_up
         is_empty_down = 1 >> is_occ_down
 
-        """The following construction ensures that this is jittable.
-        When electron/magnetization numbers are conserved (as it is often the case),
-        we know the correct size of these nonzero arrays. Then we could use scans
-        in the following but we want to keep things general for now and stick to
-        the jax while loop constructions and fill up the nonzero arrays with "-1"'s.
-        Just to be safe, we increase the maximal expected size by 1 in order to always have
-        at least one "-1" in the array."""
-        up_occ_inds = jnp.nonzero(is_occ_up, size=len(is_occ_up)+1, fill_value=-1)[0]
-        down_occ_inds = jnp.nonzero(is_occ_down, size=len(is_occ_down)+1, fill_value=-1)[0]
-        up_unocc_inds = jnp.nonzero(is_empty_up, size=len(is_empty_up)+1, fill_value=-1)[0]
-        down_unocc_inds = jnp.nonzero(is_empty_down, size=len(is_empty_down)+1, fill_value=-1)[0]
-
-        """ The code should definitely be made more readable at one point,
-        maybe we want to use the jax.experimental.loops interface for this
-        but it is not entirely clear how polished that is at the moment and
-        if there might be some speed penalties, we definitely want speed here.
-        The implementation mostly follows the construction of the connected configurations
-        as applied in the get_conn_flattened method which is more readable. This is based
-        on the approach as presented in [Neuscamman (2013), https://doi.org/10.1063/1.4829835]."""
-
-
-        """ This defines the stopping criterion for the loops over the indices
-        (we stop looping over the index array when we find a "-1" which indicates
-        that no more sites exists with the wanted occupancy)."""
-        def loop_stop_cond(index_array, arg):
-            return index_array[arg[0]] != -1
-        up_occ_cond = partial(loop_stop_cond, up_occ_inds)
-        up_unocc_cond = partial(loop_stop_cond, up_unocc_inds)
-        down_occ_cond = partial(loop_stop_cond, down_occ_inds)
-        down_unocc_cond = partial(loop_stop_cond, down_unocc_inds)
+        up_occ_inds, = jnp.nonzero(is_occ_up, size=n_elecs[0])
+        down_occ_inds, = jnp.nonzero(is_occ_down, size=n_elecs[1])
+        up_unocc_inds, = jnp.nonzero(is_empty_up, size=n_sites-n_elecs[0])
+        down_unocc_inds, = jnp.nonzero(is_empty_down, size=n_sites-n_elecs[1])
 
         # Compute log_amp of sample
         if use_fast_update:
@@ -294,137 +105,154 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
             if use_fast_update:
                 log_amp_connected = logpsi(parameters, jnp.expand_dims(updated_occ_partial, 0), update_sites=jnp.expand_dims(update_sites, 0))
             else:
-                updated_config = sample.at[update_sites].set(updated_occ_partial)
+                """
+                Careful: Go through update_sites in reverse order to ensure the actual updates (which come first in the array)
+                are applied and not the dummy updates.
+                Due to the non-determinism of updates with .at, we cannot use this and need to scan explicitly.
+                """
+                def scan_fun(carry, count):
+                    return (carry.at[update_sites[count]].set(updated_occ_partial[count]), None)
+                updated_config = jax.lax.scan(scan_fun, sample, jnp.arange(len(update_sites)), reverse=True)[0]
                 log_amp_connected = logpsi(pars, jnp.expand_dims(updated_config, 0))
             return log_amp_connected
 
         # Computes term from single electron hop
-        def compute_connected_1B(args):
-            i = args[0][0]
-            a = args[0][1]
-            spin_int = args[1]
-            el_count = args[2]
-            def valid_hop(_):
-                # Updated config at update sites
-                new_occ = jnp.array([sample[i]-spin_int, sample[a]+spin_int], dtype=jnp.uint8)
-                update_sites = jnp.array([i, a])
-                # Get parity
-                parity_count = el_count[i] + el_count[a] - (a>=i).astype(int) - 1
-                parity_multiplicator = -2*(parity_count & 1) + 1
-                # Evaluate amplitude ratio
-                log_amp_connected = get_connected_log_amp(new_occ, update_sites)
-                amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
-                return (amp_ratio * parity_multiplicator).astype(complex)
-            def invalid_hop(_):
-                return 0.j
-            return jax.lax.cond((sample[a]&spin_int).astype(bool), invalid_hop, valid_hop, None)
 
-        # One-body up
-        def outer_loop_occ(arg):
-            i = up_occ_inds[arg[0]]
-            def inner_loop(arg):
-                a = h_nonzero_inds[arg[0]]
-                value = jax.lax.cond(a != i, compute_connected_1B, lambda _: jnp.array(1., dtype=complex), ((i, a), 1, up_count))
-                return (arg[0] + 1, arg[1] + h[arg[0]] * value)
-            def stop_cond(arg):
-                return arg[0] < h_nonzero_secs[i+1]
-            value = jax.lax.while_loop(stop_cond, inner_loop, (h_nonzero_secs[i], 0.))[1]
-            return (arg[0] + 1, arg[1] + value)
-        local_en = jax.lax.while_loop(up_occ_cond, outer_loop_occ, (0, 0.))[1]
+        # up spin
+        def compute_1B_up(i):
+            def inner_loop(a_index, val):
+                a = h1_nonzero_ids_flat[a_index]
+                def valid_hop():
+                    # Updated config at update sites
+                    new_occ = jnp.array([sample[i]-1, sample[a]+1], dtype=jnp.uint8)
+                    update_sites = jnp.array([i, a])
+                    # Get parity
+                    parity_multiplicator = get_parity_multiplicator_hop(update_sites, up_count)
+                    # Evaluate amplitude ratio
+                    log_amp_connected = get_connected_log_amp(new_occ, update_sites)
+                    amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                    return (amp_ratio * parity_multiplicator)
+                def invalid_hop():
+                    return jax.lax.select(i==a, jnp.array(1, dtype=log_amp.dtype), jnp.array(0, dtype=log_amp.dtype))
+                return val + h1_nonzero_vals_flat[a_index] * jax.lax.cond(is_empty_up[a], valid_hop, invalid_hop)
+            return jax.lax.fori_loop(h1_nonzero_range[i], h1_nonzero_range[i+1], inner_loop, jnp.array(0, dtype=log_amp.dtype))
 
-        # One-body down
-        def outer_loop_occ(arg):
-            i = down_occ_inds[arg[0]]
-            def inner_loop(arg):
-                a = h_nonzero_inds[arg[0]]
-                value = jax.lax.cond(a != i, compute_connected_1B, lambda _: jnp.array(1., dtype=complex), ((i, a), 2, down_count))
-                return (arg[0] + 1, arg[1] + h[arg[0]] * value)
-            def stop_cond(arg):
-                return arg[0] < h_nonzero_secs[i+1]
-            value = jax.lax.while_loop(stop_cond, inner_loop, (h_nonzero_secs[i], 0.))[1]
-            return (arg[0] + 1, arg[1] + value)
-        local_en += jax.lax.while_loop(down_occ_cond, outer_loop_occ, (0, 0.))[1]
+        local_en = jnp.sum(jax.vmap(compute_1B_up)(up_occ_inds))
 
-        occ_inds = (up_occ_inds, down_occ_inds)
-        spin_ints = jnp.array([1, 2])
-        electron_counts = (up_count, down_count)
-        occ_conds = (up_occ_cond, down_occ_cond)
+        def compute_1B_down(i):
+            def inner_loop(a_index, val):
+                a = h1_nonzero_ids_flat[a_index]
+                def valid_hop():
+                    # Updated config at update sites
+                    new_occ = jnp.array([sample[i]-2, sample[a]+2], dtype=jnp.uint8)
+                    update_sites = jnp.array([i, a])
+                    # Get parity
+                    parity_multiplicator = get_parity_multiplicator_hop(update_sites, down_count)
+                    # Evaluate amplitude ratio
+                    log_amp_connected = get_connected_log_amp(new_occ, update_sites)
+                    amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                    return (amp_ratio * parity_multiplicator)
+                def invalid_hop():
+                    return jax.lax.select(i==a, jnp.array(1, dtype=log_amp.dtype), jnp.array(0, dtype=log_amp.dtype))
+                return val + h1_nonzero_vals_flat[a_index] * jax.lax.cond(is_empty_down[a], valid_hop, invalid_hop)
+            return jax.lax.fori_loop(h1_nonzero_range[i], h1_nonzero_range[i+1], inner_loop, jnp.array(0, dtype=log_amp.dtype))
 
-        # Helper function which adds an update by a creation or an annihilation operator
+        local_en += jnp.sum(jax.vmap(compute_1B_down)(down_occ_inds))
+
+        # Helper function which updates a config, also taking into account a previous update
         def update_config(site, update_sites, updated_conf, spin_int, create):
-            index_in_sites = jnp.squeeze(jnp.nonzero(update_sites==site, size=1, fill_value=-1)[0])
-            update_sign = jax.lax.cond(create, lambda _: 1, lambda _: -1, None)
-            def update(index):
-                valid = jnp.array((updated_conf[index]&spin_int), dtype=bool) ^ create
-                new_occ = jnp.append(updated_conf.at[index].add(update_sign * spin_int), 4)
-                update_sites_new = jnp.append(update_sites, -1)
-                return new_occ, valid, update_sites_new
-            def append(index):
-                valid = jnp.array((sample[site]&spin_int), dtype=bool) ^ create
-                new_occ = jnp.append(updated_conf, sample[site] + update_sign * spin_int)
-                update_sites_new = jnp.append(update_sites, site)
-                return new_occ, valid, update_sites_new
-            return jax.lax.cond(jnp.squeeze(index_in_sites!=-1), update, append, index_in_sites)
+            update_sites = jnp.append(update_sites, site)
+            updated_conf = jnp.append(updated_conf, sample[site])
+            first_matching_index = jnp.nonzero(update_sites == site, size=1)[0][0]
+            valid = jax.lax.select(create, ~(updated_conf[first_matching_index]&spin_int).astype(bool), (updated_conf[first_matching_index]&spin_int).astype(bool))
+            updated_conf = updated_conf.at[first_matching_index].add(jax.lax.select(create, spin_int, -spin_int))
+            return updated_conf, valid, update_sites
 
+        def two_body_up_up_occ(inds):
+            i = up_occ_inds[inds[0]]
+            j = up_occ_inds[inds[1]]
+            update_sites_ij = jnp.array([i, j])
+            new_occ_ij = jnp.array([sample[i]-1, sample[j]-1], dtype=jnp.uint8)
+            parity_count_ij = up_count[i] + up_count[j] - 2
 
-        # Two body terms
-        # TODO: Clean this up, make this more readable, add documentation
-        def get_two_body_contraction(spin_indices):
-            def first_loop_occ(arg):
-                i = occ_inds[spin_indices[0]][arg[0]]
-                update_sites_i = jnp.array([i])
-                new_occ_i = jnp.array([sample[i]-spin_ints[spin_indices[0]]])
-                parity_count_i = electron_counts[spin_indices[0]][i] - 1
-                valid_i = True
-                def second_loop_occ(arg):
-                    j = occ_inds[spin_indices[1]][arg[0]]
-                    new_occ_j, valid_j, update_sites_j = update_config(j, update_sites_i, new_occ_i, spin_ints[spin_indices[1]], False)
-                    parity_count_j = parity_count_i + electron_counts[spin_indices[1]][j] - 1
-                    parity_count_j -= jnp.array((j > i)*(spin_indices[0] == spin_indices[1]), dtype=int)
-                    def compute_inner(_):
-                        def inner_loop_unocc(arg):
-                            a = eri_nonzero_inds[arg[0], 1]
-                            b = eri_nonzero_inds[arg[0], 0]
-                            new_occ_a, valid_a, update_sites_a = update_config(a, update_sites_j, new_occ_j, spin_ints[spin_indices[1]], True)
-                            new_occ_b, valid_b, update_sites_b = update_config(b, update_sites_a, new_occ_a, spin_ints[spin_indices[0]], True)
-                            valid = jnp.logical_and(valid_a, valid_b)
+            def inner_loop(ab_index, val):
+                a = h2_nonzero_ids_flat[ab_index, 0]
+                b = h2_nonzero_ids_flat[ab_index, 1]
 
-                            def get_val(_):
-                                parity_count = parity_count_j + electron_counts[spin_indices[1]][a] + electron_counts[spin_indices[0]][b]
-                                parity_count -= jnp.array(a >= j, dtype=int) + jnp.array((a >= i)*(spin_indices[0] == spin_indices[1]), dtype=int)
-                                parity_count -= jnp.array((b >= j)*(spin_indices[0] == spin_indices[1]), dtype=int) + jnp.array(b >= i, dtype=int)
-                                parity_count += jnp.array((b >= a)*(spin_indices[0] == spin_indices[1]), dtype=int)
-                                parity_multiplicator = -2*(parity_count & 1) + 1
-                                true_updates = jnp.logical_and(new_occ_b != 4, new_occ_b != sample[update_sites_b])
-                                no_updates = jnp.sum(true_updates)
-                                def updates_0(_):
-                                    return jnp.array(1., dtype=complex)
-                                def update(no_updates, _):
-                                    update_inds = jnp.nonzero(true_updates, size=no_updates)[0]
-                                    new_occ = new_occ_b[update_inds]
-                                    update_sites = update_sites_b[update_inds]
-                                    log_amp_connected = get_connected_log_amp(new_occ, update_sites)
-                                    amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
-                                    return amp_ratio
-                                amp_ratio = jax.lax.switch(no_updates, [updates_0, partial(update, 1),
-                                                                        partial(update, 2), partial(update, 3),
-                                                                        partial(update, 4)], None)
-                                return (eri[arg[0]] * amp_ratio * parity_multiplicator).astype(complex)
+                new_occ_ijb, valid_b, update_sites_ijb = update_config(b, update_sites_ij, new_occ_ij, 1, True)
+                new_occ, valid_a, update_sites = update_config(a, update_sites_ijb, new_occ_ijb, 1, True)
+                valid = valid_a & valid_b
 
-                            value = jax.lax.cond(valid, get_val, lambda _: jnp.array(0., dtype=complex), None)
-                            return (arg[0] + 1, arg[1] + value)
-                        def stop_cond(arg):
-                            return arg[0] < eri_nonzero_secs[j*n_orbs+i+1]
-                        return jax.lax.while_loop(stop_cond, inner_loop_unocc, (eri_nonzero_secs[j*n_orbs+i], 0.))[1]
-                    value = jax.lax.cond(valid_j, compute_inner, lambda _: jnp.array(0., dtype=complex), None)
-                    return (arg[0] + 1, arg[1] + value)
-                value = jax.lax.while_loop(partial(loop_stop_cond, occ_inds[spin_indices[1]]), second_loop_occ, (0, 0.))[1]
-                return (arg[0] + 1, arg[1] + value)
-            return jax.lax.while_loop(partial(loop_stop_cond, occ_inds[spin_indices[0]]), first_loop_occ, (0, 0.))[1]
+                def get_val():
+                    parity_count = parity_count_ij + up_count[a] + up_count[b]
+                    parity_count -= (a >= j).astype(int) + (a >= i).astype(int) + (b >= j).astype(int) + (b >= i).astype(int) - (a >= b).astype(int) + (j > i).astype(int)
+                    parity_multiplicator = -2*(parity_count & 1) + 1
+                    log_amp_connected = get_connected_log_amp(new_occ, update_sites)
+                    amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                    return (h2_nonzero_vals_flat[ab_index] * amp_ratio * parity_multiplicator)
 
-        local_en += 0.5 * get_two_body_contraction((0,0))
-        local_en += 0.5 * get_two_body_contraction((1,1))
-        local_en += get_two_body_contraction((0,1))
+                value = jax.lax.cond(valid, get_val, lambda : jnp.array(0., dtype=log_amp.dtype))
+                return val + value
+            return jax.lax.fori_loop(h2_nonzero_range[i,j], h2_nonzero_range[i,j+1], inner_loop, jnp.array(0, dtype=log_amp.dtype))
+        local_en += jnp.sum(jax.vmap(two_body_up_up_occ)(jnp.triu_indices(up_occ_inds.shape[0], k=1)))
+
+        def two_body_down_down_occ(inds):
+            i = down_occ_inds[inds[0]]
+            j = down_occ_inds[inds[1]]
+            update_sites_ij = jnp.array([i, j])
+            new_occ_ij = jnp.array([sample[i]-2, sample[j]-2], dtype=jnp.uint8)
+            parity_count_ij = down_count[i] + down_count[j] - 2
+
+            def inner_loop(ab_index, val):
+                a = h2_nonzero_ids_flat[ab_index, 0]
+                b = h2_nonzero_ids_flat[ab_index, 1]
+
+                new_occ_ijb, valid_b, update_sites_ijb = update_config(b, update_sites_ij, new_occ_ij, 2, True)
+                new_occ, valid_a, update_sites = update_config(a, update_sites_ijb, new_occ_ijb, 2, True)
+                valid = valid_a & valid_b
+
+                def get_val():
+                    parity_count = parity_count_ij + down_count[a] + down_count[b]
+                    parity_count -= (a >= j).astype(int) + (a >= i).astype(int) + (b >= j).astype(int) + (b >= i).astype(int) - (a >= b).astype(int) + (j > i).astype(int)
+                    parity_multiplicator = -2*(parity_count & 1) + 1
+                    log_amp_connected = get_connected_log_amp(new_occ, update_sites)
+                    amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                    return (h2_nonzero_vals_flat[ab_index] * amp_ratio * parity_multiplicator)
+
+                value = jax.lax.cond(valid, get_val, lambda : jnp.array(0., dtype=log_amp.dtype))
+                return val + value
+            return jax.lax.fori_loop(h2_nonzero_range[i,j], h2_nonzero_range[i,j+1], inner_loop, jnp.array(0, dtype=log_amp.dtype))
+        local_en += jnp.sum(jax.vmap(two_body_down_down_occ)(jnp.triu_indices(down_occ_inds.shape[0], k=1)))
+
+        def two_body_up_down_occ(inds):
+            i = up_occ_inds[inds[0]]
+            j = down_occ_inds[inds[1]]
+            update_sites_i = jnp.array([i])
+            new_occ_i = jnp.array([sample[i]-1], dtype=jnp.uint8)
+            new_occ_ij, _, update_sites_ij = update_config(j, update_sites_i, new_occ_i, 2, False)
+            parity_count_ij = up_count[i] + down_count[j] - 2
+
+            def inner_loop(ab_index, val):
+                a = h2_nonzero_ids_flat[ab_index, 0]
+                b = h2_nonzero_ids_flat[ab_index, 1]
+
+                new_occ_ijb, valid_b, update_sites_ijb = update_config(b, update_sites_ij, new_occ_ij, 2, True)
+                new_occ, valid_a, update_sites = update_config(a, update_sites_ijb, new_occ_ijb, 1, True)
+                valid = valid_a & valid_b
+
+                def get_val():
+                    parity_count = parity_count_ij + up_count[a] + down_count[b]
+                    parity_count -= (a >= i).astype(int) + (b >= j).astype(int)
+                    parity_multiplicator = -2*(parity_count & 1) + 1
+                    log_amp_connected = get_connected_log_amp(new_occ, update_sites)
+                    amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
+                    return (h2_nonzero_vals_flat[ab_index] * amp_ratio * parity_multiplicator)
+
+                value = jax.lax.cond(valid, get_val, lambda : jnp.array(0., dtype=log_amp.dtype))
+                return val + value
+            return jax.lax.fori_loop(h2_nonzero_range[i,j], h2_nonzero_range[i,j+1], inner_loop, jnp.array(0, dtype=log_amp.dtype))
+        row_inds, col_inds = jnp.indices((up_occ_inds.shape[0], down_occ_inds.shape[0]))
+        local_en += jnp.sum(jax.vmap(two_body_up_down_occ)((row_inds.flatten(), col_inds.flatten())))
 
         return local_en
     return nkjax.vmap_chunked(vmap_fun, chunk_size=chunk_size)(samples)
@@ -432,8 +260,16 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
 @nk.vqs.get_local_kernel_arguments.dispatch
 def get_local_kernel_arguments(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse):
     samples = vstate.samples
-    return (samples, (op.h_nonzero_vals, op.h_nonzero_inds, op.h_nonzero_secs, op.eri_nonzero_vals,
-                      op.eri_nonzero_inds, op.eri_nonzero_secs))
+    h1_nonzero_range = jnp.array(op.h1_nonzero_range)
+    h1_nonzero_ids_flat = jnp.array(op.h1_nonzero_ids_flat)
+    h1_nonzero_vals_flat = jnp.array(op.h1_nonzero_vals_flat)
+
+    h2_nonzero_range = jnp.array(op.h2_nonzero_range)
+    h2_nonzero_ids_flat = jnp.array(op.h2_nonzero_ids_flat)
+    h2_nonzero_vals_flat = jnp.array(op.h2_nonzero_vals_flat)
+
+    return (samples, (h1_nonzero_range, h1_nonzero_ids_flat, h1_nonzero_vals_flat,
+                      h2_nonzero_range, h2_nonzero_ids_flat, h2_nonzero_vals_flat))
 
 @nk.vqs.get_local_kernel.dispatch(precedence=1)
 def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse, chunk_size: Optional[int] = None):
@@ -441,4 +277,4 @@ def get_local_kernel(vstate: nk.vqs.MCState, op: AbInitioHamiltonianSparse, chun
         use_fast_update = vstate.model.apply_fast_update
     except:
         use_fast_update = False
-    return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)
+    return nkjax.HashablePartial(local_en_on_the_fly, vstate.hilbert._n_elec, use_fast_update=use_fast_update, chunk_size=chunk_size)
