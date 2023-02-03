@@ -10,7 +10,7 @@ def MetropolisFastHopping(hilbert, *args, clusters=None, graph=None, hop_probabi
 
     hoppingrule = FermionicHoppingRuleWithUpdates(hop_probability=hop_probability, transition_probs=transition_probs)
 
-    return MetropolisFastSampler(hilbert, hoppingrule, *args, **kwargs)
+    return MetropolisFastSampler(hilbert, hoppingrule, *args, dtype=np.uint8, **kwargs)
 
 def MetropolisHopping(hilbert, *args, clusters=None, graph=None, hop_probability=1.0, transition_probs=None, **kwargs) -> MetropolisFastSampler:
     from .rules.fermionic_hopping import FermionicHoppingRule
@@ -20,4 +20,4 @@ def MetropolisHopping(hilbert, *args, clusters=None, graph=None, hop_probability
 
     hoppingrule = FermionicHoppingRule(hop_probability=hop_probability, transition_probs=transition_probs)
 
-    return MetropolisSampler(hilbert, hoppingrule, *args, **kwargs)
+    return MetropolisSampler(hilbert, hoppingrule, *args, dtype=np.uint8, **kwargs)
