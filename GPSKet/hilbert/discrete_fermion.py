@@ -62,4 +62,4 @@ class FermionicDiscreteHilbert(HomogeneousHilbert):
 
     def __repr__(self):
         n_elec = (", n_up={}, n_down={}".format(self._n_elec[0], self._n_elec[1]) if self._n_elec is not None else "")
-        return "Fermion(N={} {}))".format(self._size, n_elec)
+        return "Fermion(N={} {}))".format(self.size, n_elec)
