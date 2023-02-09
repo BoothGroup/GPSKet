@@ -42,7 +42,8 @@ class minSRVMC(VMC):
         samples = samples.reshape((-1, samples.shape[-1]))
         counts = counts.reshape((-1,))
 
-        loc_ens = self.state.local_estimators(self._ham).reshape(-1)
+        # Transpose as local_estimators function flips the axes
+        loc_ens = self.state.local_estimators(self._ham).T.reshape(-1)
 
         O = nk.jax.jacobian(self.state._apply_fun, self.state.parameters, samples,
                             self.state.model_state, mode = self.mode, pdf = counts, dense=True, center=True)
