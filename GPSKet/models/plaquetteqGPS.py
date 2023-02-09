@@ -4,7 +4,7 @@ import numpy as np
 import flax.linen as nn
 from netket.utils import HashableArray
 from netket.utils.types import NNInitFunc, Array, DType, Callable
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from GPSKet.nn.initializers import normal
 
@@ -21,8 +21,7 @@ class PlaquetteqGPS(nn.Module):
     M: int
     plaquettes: HashableArray
     dtype: DType = jnp.complex128
-    init_fun: NNInitFunc = normal()
-    to_indices: Callable = lambda samples : samples.astype(jnp.uint8)
+    init_fun: Optional[NNInitFunc] = None # Defaults to qGPS-normal with the parameter dtype
     """
     syms is a tuple of two function representing the symmetry operations.
     the first function creates all symmetrically equivalent copies of the test configuration
@@ -68,9 +67,14 @@ class PlaquetteqGPS(nn.Module):
     """
     @nn.compact
     def __call__(self, inputs, cache_intermediates=False, update_sites=None):
-        indices = self.to_indices(inputs)
+        indices = self.hilbert.states_to_local_indices(inputs)
 
-        epsilon = self.param("epsilon", self.init_fun, (self.local_dim, self.plaquettes.shape[0], self.M, self.plaquettes.shape[1]), self.dtype)
+        if self.init_fun is None:
+            init = normal(dtype=self.dtype)
+        else:
+            init = self.init_fun
+
+        epsilon = self.param("epsilon", init, (self.local_dim, self.plaquettes.shape[0], self.M, self.plaquettes.shape[1]), self.dtype)
 
         plaquettes = np.asarray(self.plaquettes)
         inv_plaquette_ids = np.asarray(self.inv_plaquette_ids)

@@ -28,18 +28,14 @@ samples_per_rank = batch_size // n_nodes
 g = nk.graph.Chain(length=L, pbc=True)
 hi = nk.hilbert.Spin(s=1/2, N=g.n_nodes)
 ha = nk.operator.Heisenberg(hilbert=hi, graph=g, sign_rule=False)
-to_indices = lambda x: jnp.asarray((x+hi.local_size-1)/hi.local_size, jnp.int8)
 arqgps = ARqGPS(
     hi, M,
-    dtype=dtype,
-    to_indices=to_indices
-)
+    dtype=dtype)
 symmetries = g.automorphisms().to_array().T
 apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARqGPS(
     hi, M,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 
@@ -75,12 +71,10 @@ hi = nk.hilbert.Spin(s=1/2, N=g.n_nodes, total_sz=0)
 arqgps = ARqGPS(
     hi, M,
     dtype=dtype,
-    to_indices=to_indices
 )
 arqgps_symm = ARqGPS(
     hi, M,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 sa = ARDirectSampler(hi, n_chains_per_rank=samples_per_rank)

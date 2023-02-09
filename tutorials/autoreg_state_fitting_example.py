@@ -70,8 +70,7 @@ hi = qk.hilbert.FermionicDiscreteHilbert(N=norb, n_elec=(nelec//2,nelec//2))
 ha = qk.operator.hamiltonian.AbInitioHamiltonianOnTheFly(hi, h1 , h2)
 
 # Setup model, sampler, and variational state
-to_indices = lambda x: x.astype(jnp.uint8)
-model = qk.models.ARqGPS(hi, 2, dtype=jnp.complex128, to_indices=to_indices, count_spins=count_spins_fermionic, renormalize_log_psi=renormalize_log_psi_fermionic)
+model = qk.models.ARqGPS(hi, 2, dtype=jnp.complex128, count_spins=count_spins_fermionic, renormalize_log_psi=renormalize_log_psi_fermionic)
 sa = qk.sampler.ARDirectSampler(hi)
 vs = nk.vqs.MCState(sa, model, n_samples=1000)
 

@@ -21,11 +21,9 @@ hi = nk.hilbert.Spin(1/2, N=g.n_nodes)
 plaquettes = HashableArray(circulant(np.arange(L)))
 masks = HashableArray(np.where(plaquettes >= np.repeat([np.arange(L)], L, axis=0).T, 0, 1))
 
-to_indices = lambda x: jnp.asarray((x+hi.local_size-1)/hi.local_size, jnp.int8)
 arqgps = ARPlaquetteqGPS(
     hi, M, plaquettes, masks,
-    dtype=dtype,
-    to_indices=to_indices
+    dtype=dtype
 )
 
 # Test #1
@@ -39,7 +37,7 @@ log_psi_test = arqgps.apply(variables, inputs)
 log_psi_true = np.zeros(batch_size, dtype=dtype)
 for k in tqdm(range(batch_size), desc="Test #1"):
     log_psi = 0
-    x_k = to_indices(inputs[k])
+    x_k = hi.states_to_local_indices(inputs[k])
     for i in range(L):
         log_psi_cond = np.zeros(hi.local_size, dtype=dtype)
         for n in range(M):
@@ -58,7 +56,6 @@ apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARPlaquetteqGPS(
     hi, M, plaquettes, masks,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 
@@ -89,7 +86,6 @@ apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARPlaquetteqGPS(
     hi, M, plaquettes, masks,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 inputs = hi.random_state(key_in, batch_size)
@@ -110,7 +106,6 @@ apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARPlaquetteqGPS(
     hi, M, plaquettes, masks,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 inputs = hi.random_state(key_in, batch_size)
@@ -130,7 +125,6 @@ for dtype in tqdm(dtypes, desc="Test #4"):
     arqgps_symm = ARPlaquetteqGPS(
         hi, M, plaquettes, masks,
         dtype=dtype,
-        to_indices=to_indices,
         apply_symmetries=apply_symmetries
     )
     variables = arqgps_symm.init(key_ma, inputs)

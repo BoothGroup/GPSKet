@@ -24,12 +24,10 @@ class ARqGPSFull(AbstractARqGPS):
     """Type of the variational parameters"""
     machine_pow: int = 2
     """Exponent required to normalize the output"""
-    init_fun: NNInitFunc = normal(dtype=dtype)
+    init_fun: Optional[NNInitFunc] = None # Defaults to qGPS-normal with the parameter dtype
     """Initializer for the variational parameters"""
     normalize: bool=True
     """Whether the Ansatz should be normalized"""
-    to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
-    """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
     apply_symmetries: Union[Callable, Tuple[Callable, Callable]] = no_syms()
     """
     Function to apply symmetries to configurations (see qGPS model definition
@@ -56,7 +54,7 @@ class ARqGPSFull(AbstractARqGPS):
 
     def _conditional(self, inputs: Array, index: int) -> Array:
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L)
+        inputs = self.hilbert.states_to_local_indices(inputs) # (B, L)
 
         # Compute conditional probability for site at index
         log_psi = _conditional(self, inputs, index) # (B, D)
@@ -67,7 +65,7 @@ class ARqGPSFull(AbstractARqGPS):
 
     def conditionals(self, inputs: Array) -> Array:
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L)
+        inputs = self.hilbert.states_to_local_indices(inputs) # (B, L)
 
         # Compute conditional probabilities for all sites
         log_psi, _ = _conditionals(self, inputs) # (B, L, D)
@@ -77,7 +75,11 @@ class ARqGPSFull(AbstractARqGPS):
         return p
 
     def setup(self):
-        self._epsilon  = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
+        if self.init_fun is None:
+            init = normal(dtype=self.dtype)
+        else:
+            init = self.init_fun
+        self._epsilon  = self.param("epsilon", init, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
         if self.apply_fast_update:
             self._saved_configs = self.variable("intermediates_cache", "samples", lambda : None)
             self._saved_context_product = self.variable("intermediates_cache", "context_prod", lambda : None)
@@ -107,7 +109,7 @@ class ARqGPSFull(AbstractARqGPS):
             # Updated occupancy
             new_occupancy, site_indices = self.apply_symmetries[1](inputs, update_sites) # (B, #updates, T), (B, #updates, T)
 
-            update_args = (self.to_indices(old_occupancy), self.to_indices(new_occupancy), site_indices)
+            update_args = (self.hilbert.states_to_local_indices(old_occupancy), self.hilbert.states_to_local_indices(new_occupancy), site_indices)
 
             def update_fun(saved_config, update_sites, occs):
                 def scan_fun(carry, count):
@@ -128,8 +130,8 @@ class ARqGPSFull(AbstractARqGPS):
         n_symm = inputs.shape[-1]
 
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L, T)
-        full_samples_sym = self.to_indices(full_samples_sym) # (B, L, T)
+        inputs = self.hilbert.states_to_local_indices(inputs) # (B, L, T)
+        full_samples_sym = self.hilbert.states_to_local_indices(full_samples_sym) # (B, L, T)
         batch_size = inputs.shape[0]
 
         # Compute conditional log-probabilities
@@ -269,8 +271,7 @@ class ARqGPSModPhaseFull(ARqGPSFull):
         self._qgps = qGPS(
             self.hilbert, self.hilbert.size,
             dtype=jnp.float64,
-            init_fun=self.init_fun,
-            to_indices=self.to_indices)
+            init_fun=self.init_fun)
 
     def __call__(self, inputs: Array) -> Array:
         log_psi_mod = super().__call__(inputs)

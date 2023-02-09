@@ -36,12 +36,11 @@ hi = ha.hilbert
 g = ha.graph
 
 # Ansatz model
-to_indices = lambda x: x.astype(jnp.uint8)
 if ansatz == 'qgps':
-    model = qGPS(hi, M, dtype=dtype, to_indices=to_indices, syms=get_sym_transformation_spin(g))
+    model = qGPS(hi, M, dtype=dtype, syms=get_sym_transformation_spin(g))
 elif ansatz == 'arqgps':
     apply_symmetries, _ = get_sym_transformation_spin(g, spin_flip=False)
-    model = ARqGPS(hi, M, dtype=dtype, to_indices=to_indices, apply_symmetries=apply_symmetries)
+    model = ARqGPS(hi, M, dtype=dtype, apply_symmetries=apply_symmetries)
 
 # Sampler
 if sampler == 'metropolis-exchange' and ansatz == "qgps":

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.special import logsumexp
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional
 from netket.utils import HashableArray
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from netket.utils.types import NNInitFunc, Array, DType, Callable
@@ -27,12 +27,10 @@ class ARPlaquetteqGPS(AbstractARqGPS):
     """Type of the variational parameters"""
     machine_pow: int = 2
     """Exponent required to normalize the output"""
-    init_fun: NNInitFunc = normal(sigma=0.01)
+    init_fun: Optional[NNInitFunc] = None # Defaults to qGPS-normal (sigma = 0.01) with the parameter dtype
     """Initializer for the variational parameters"""
     normalize: bool=True
     """Whether the Ansatz should be normalized"""
-    to_indices: Callable = lambda inputs : inputs.astype(jnp.uint8)
-    """Function to convert configurations into indices, e.g. a mapping from {-local_dim/2, local_dim/2}"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
     # TODO: extend to cases beyond D=2
@@ -53,7 +51,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
 
     def _conditional(self, inputs: Array, args: Tuple) -> Array:
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L)
+        inputs = self.hilbert.states_to_local_indices(inputs) # (B, L)
 
         # Compute conditional probability for site at index
         log_psi = _conditional(self, inputs, args) # (B, D)
@@ -64,7 +62,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
 
     def conditionals(self, inputs: Array) -> Array:
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L)
+        inputs = self.hilbert.states_to_local_indices(inputs) # (B, L)
 
         # Compute conditional probabilities for all sites
         log_psi = _conditionals(self, inputs) # (B, L, D)
@@ -74,6 +72,10 @@ class ARPlaquetteqGPS(AbstractARqGPS):
         return p
 
     def setup(self):
+        if self.init_fun is None:
+            init = normal(sigma = 0.01, dtype=self.dtype)
+        else:
+            init = self.init_fun
         self._epsilon = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, self.hilbert.size), self.dtype)
         if self.hilbert.constrained:
             self._n_spins = self.variable("cache", "spins", zeros, None, (1, self.hilbert.local_size))
@@ -87,7 +89,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
         n_symm = inputs.shape[-1]
 
         # Convert input configurations into indices
-        inputs = self.to_indices(inputs) # (B, L, T)
+        inputs = self.hilbert.states_to_local_indices(inputs) # (B, L, T)
         batch_size = inputs.shape[0]
 
         # Compute conditional log-probabilities

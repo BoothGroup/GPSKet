@@ -15,11 +15,9 @@ batch_size = 16
 g = nk.graph.Chain(length=L, pbc=True)
 hi = nk.hilbert.Spin(1/2, N=g.n_nodes)
 
-to_indices = lambda x: jnp.asarray((x+hi.local_size-1)/hi.local_size, jnp.int8)
 arqgps = ARqGPSFull(
     hi, M,
-    dtype=dtype,
-    to_indices=to_indices
+    dtype=dtype
 )
 
 # Test #1
@@ -32,7 +30,7 @@ log_psi_true = np.zeros(batch_size, dtype=dtype)
 epsilon = np.asarray(variables.unfreeze()['params']['epsilon'], dtype=dtype)
 for k in tqdm(range(batch_size), desc="Test #1"):
     log_psi = 0+0*1j
-    x_k = to_indices(inputs[k])
+    x_k = hi.states_to_local_indices(inputs[k])
     for i in range(L):
         log_psi_cond = np.zeros(hi.local_size, dtype=dtype)
         for n in range(M):
@@ -52,7 +50,6 @@ apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARqGPSFull(
     hi, M,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 
@@ -82,7 +79,6 @@ apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARqGPSFull(
     hi, M,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 inputs = hi.random_state(key_in, batch_size)
@@ -101,7 +97,6 @@ apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
 arqgps_symm = ARqGPSFull(
     hi, M,
     dtype=dtype,
-    to_indices=to_indices,
     apply_symmetries=apply_symmetries
 )
 inputs = hi.random_state(key_in, batch_size)
