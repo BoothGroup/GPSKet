@@ -48,7 +48,7 @@ class minSRVMC(VMC):
                             self.state.model_state, mode = self.mode, pdf = counts, dense=True, center=True)
 
 
-        self._loss_stats, dense_update = compute_update(loc_ens, O, counts, self.solver)
+        self._loss_stats, self._loss_grad, dense_update = compute_update(loc_ens, O, counts, self.solver)
 
         # Convert back to pytree
         unravel = lambda x : x
@@ -83,13 +83,15 @@ def compute_update(loc_ens, O, counts, solver):
     if len(O.shape) == 3:
         O = O[:,0,:] + 1.j * O[:,1,:]
 
+    loss_grad = jnp.dot(O.T, loc_ens_centered).real
+
     OO = O.dot(O.conj().T)
 
     OO_epsilon = solver(OO).dot(loc_ens_centered)
 
     dense_update = O.conj().T.dot(OO_epsilon)
 
-    return loss_stats, dense_update
+    return loss_stats, loss_grad, dense_update
 
 
 
