@@ -93,6 +93,8 @@ class MCStateUniqueSamples(nk.vqs.MCState):
                 for (i, samp) in enumerate(all_samples):
                     unique_samps[tuple(samp)] += all_counts[i]
 
+                count += 1
+
                 if self.max_sampling_steps is not None:
                     if self.max_sampling_steps <= count:
                         continue_sampling = False
@@ -101,7 +103,6 @@ class MCStateUniqueSamples(nk.vqs.MCState):
                 if continue_sampling:
                     samps = self.sample(n_samples = self.batch_size, n_discard_per_chain=0)
 
-                count += 1
 
             unique_samples = np.tile(all_samples[0], (self.n_samples, 1))
             relative_counts = np.zeros(self.n_samples, dtype=float)
