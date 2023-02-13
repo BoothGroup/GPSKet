@@ -87,7 +87,10 @@ class ARqGPSFull(AbstractARqGPS):
             self._epsilon  = self.param("epsilon", init, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
         if self.apply_fast_update:
             self._saved_configs = self.variable("intermediates_cache", "samples", lambda : None)
-            self._saved_context_product = self.variable("intermediates_cache", "context_prod", lambda : None)
+            if isinstance(self.M, HashableArray):
+                self._saved_context_product  = tuple([self.variable("intermediates_cache", "context_prod_{}".format(i), lambda : None) for i in range(self.M.shape[0])])
+            else:
+                self._saved_context_product = self.variable("intermediates_cache", "context_prod", lambda : None)
         if self.hilbert.constrained:
             self._n_spins = self.variable("cache", "spins", zeros, None, (1, self.hilbert.local_size))
         if self.apply_fast_update:
@@ -141,9 +144,14 @@ class ARqGPSFull(AbstractARqGPS):
 
         # Compute conditional log-probabilities
         if update_sites is not None:
-            log_psi, context_products = jax.vmap(_conditionals, in_axes=(None, -1, -1, -1), out_axes=(-1, -1))(self, full_samples_sym, update_args, self._saved_context_product.value) # (B, L, D, T), (B, L, M, T)
+            if isinstance(self._epsilon, tuple):
+                old_contexts = [cont_prod.value for cont_prod in self._saved_context_product]
+            else:
+                old_contexts = self._saved_context_product.value
+
+            log_psi, context_products = jax.vmap(_conditionals, in_axes=(None, -1, -1, -1), out_axes=(-1, -1))(self, full_samples_sym, update_args, old_contexts) # (B, L, D, T), (L, B, M, T)
         else:
-            log_psi, context_products = jax.vmap(_conditionals, in_axes=(None, -1, None, None), out_axes=(-1, -1))(self, full_samples_sym, None, None) # (B, L, D, T), (B, L, M, T)
+            log_psi, context_products = jax.vmap(_conditionals, in_axes=(None, -1, None, None), out_axes=(-1, -1))(self, full_samples_sym, None, None) # (B, L, D, T), (L, B, M, T)
         if self.normalize:
             log_psi = _normalize(log_psi, self.machine_pow, axis=-2)
 
@@ -158,7 +166,11 @@ class ARqGPSFull(AbstractARqGPS):
         log_psi_symm = log_psi_symm_re+1j*log_psi_symm_im
 
         if cache_intermediates:
-            self._saved_context_product.value = context_products
+            if isinstance(self._epsilon, tuple):
+                for i in range(len(context_products)):
+                    self._saved_context_product[i].value = context_products[i]
+            else:
+                self._saved_context_product.value = context_products
             self._saved_configs.value = full_samples
 
         return log_psi_symm # (B,)
@@ -259,7 +271,10 @@ def _conditionals(model: ARqGPSFull, inputs: Array, update_args: Optional[Tuple[
     # Loop over sites while computing log conditional probabilities
     def _scan_fun(n_spins, index):
         if saved_context_product is not None:
-            n_spins, log_psi, context_product = _compute_conditional(model, n_spins, inputs, index, update_args, saved_context_product[:, index, :])
+            if isinstance(model._epsilon, tuple):
+                n_spins, log_psi, context_product = _compute_conditional(model, n_spins, inputs, index, update_args, saved_context_product[index][:, :])
+            else:
+                n_spins, log_psi, context_product = _compute_conditional(model, n_spins, inputs, index, update_args, saved_context_product[index, :, :])
         else:
             n_spins, log_psi, context_product = _compute_conditional(model, n_spins, inputs, index)
         n_spins = gpu_cond(
@@ -283,9 +298,9 @@ def _conditionals(model: ARqGPSFull, inputs: Array, update_args: Optional[Tuple[
             else:
                 log_psi = jnp.append(log_psi, jnp.expand_dims(value[0], axis=0), axis=0)
             if context_product is None:
-                context_product = jnp.expand_dims(value[1], axis=0)
+                context_product = (value[1],)
             else:
-                context_product = jnp.append(context_product, jnp.expand_dims(value[1], axis=0), axis=0)
+                context_product = (*context_product, value[1])
     else:
         _, value = jax.lax.scan(
             _scan_fun,
@@ -294,8 +309,7 @@ def _conditionals(model: ARqGPSFull, inputs: Array, update_args: Optional[Tuple[
         )
         log_psi, context_product = value
     log_psi = jnp.transpose(log_psi, [1, 0, 2])
-    context_product = jnp.transpose(context_product, [1, 0, 2])
-    return log_psi, context_product # (B, L, D), (B, L, M)
+    return log_psi, context_product # (B, L, D), (L, B, M)
 
 class ARqGPSModPhaseFull(ARqGPSFull):
     """
