@@ -179,7 +179,12 @@ def _compute_conditional(model: ARqGPSFull, n_spins: Array, inputs: Array, index
                          update_args: Optional[Tuple[Array, Array, Array]]=None,
                          saved_context_prod: Optional[Array]=None) -> Union[Array, Array, Array]:
     if isinstance(model._epsilon, tuple):
-        input_param = model._epsilon[index][:,:,-1]
+        # Currently, We want this function to be callable with index < 0 for _init_cache function
+        if index < 0:
+            proper_index = 0
+        else:
+            proper_index = index
+        input_param = model._epsilon[proper_index][:,:,-1]
     else:
         # Get the epsilon sub-tensor for the current index
         lower_index = (index * (index+1))//2
@@ -191,11 +196,6 @@ def _compute_conditional(model: ARqGPSFull, n_spins: Array, inputs: Array, index
 
     if update_args is None:
         if isinstance(model._epsilon, tuple):
-            # Currently, We want this function to be callable with index < 0 for _init_cache function
-            if index < 0:
-                proper_index = 0
-            else:
-                proper_index = index
             inputs = inputs[:,:proper_index+1]
             local_epsilon = model._epsilon[proper_index]
         else:
