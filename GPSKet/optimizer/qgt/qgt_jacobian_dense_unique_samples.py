@@ -43,16 +43,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
 
     samples, counts = vstate.samples_with_counts
 
-    jacobians = nkjax.jacobian(vstate._apply_fun, vstate.parameters, samples, vstate.model_state, mode=mode, chunk_size=chunk_size, dense=True, center=False)
-
-    if len(jacobians.shape) == 3:
-        reshaped_counts = counts.reshape((-1, 1, 1))
-    else:
-        reshaped_counts = counts.reshape((-1, 1))
-
-    jacobians_mean = _sum(reshaped_counts * jacobians, axis=0, keepdims=True)
-
-    centered_oks =  jnp.sqrt(reshaped_counts) * (jacobians - jacobians_mean)
+    centered_oks = nkjax.jacobian(vstate._apply_fun, vstate.parameters, samples, vstate.model_state, mode=mode, chunk_size=chunk_size, pdf = counts, dense=True, center=True)
 
     pars_struct = jax.tree_map(lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), vstate.parameters)
 
