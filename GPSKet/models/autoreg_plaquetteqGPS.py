@@ -76,7 +76,7 @@ class ARPlaquetteqGPS(AbstractARqGPS):
             init = normal(sigma = 0.01, dtype=self.dtype)
         else:
             init = self.init_fun
-        self._epsilon = self.param("epsilon", self.init_fun, (self.hilbert.local_size, self.M, self.hilbert.size), self.dtype)
+        self._epsilon = self.param("epsilon", init, (self.hilbert.local_size, self.M, self.hilbert.size), self.dtype)
         if self.hilbert.constrained:
             self._n_spins = self.variable("cache", "spins", zeros, None, (1, self.hilbert.local_size))
 
