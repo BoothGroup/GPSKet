@@ -1,8 +1,10 @@
+import numpy as np
 import jax
 from jax.nn.initializers import zeros
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
-from typing import Union, Optional, Tuple
+from typing import Union, Optional, Tuple, List
+from netket.utils import HashableArray
 from netket.utils.types import DType, NNInitFunc, Callable, Array
 from flax import linen as nn
 from GPSKet.nn.initializers import normal
@@ -18,7 +20,7 @@ class ARqGPSFull(AbstractARqGPS):
     zero magnetization sector.
     """
 
-    M: int
+    M: Union[int, HashableArray] # If M is a list, it defines a per-site support dimension -> this should be faster to evaluate but gives a significant compilation overhead
     """Bond dimension"""
     dtype: DType = jnp.complex128
     """Type of the variational parameters"""
@@ -79,7 +81,10 @@ class ARqGPSFull(AbstractARqGPS):
             init = normal(dtype=self.dtype)
         else:
             init = self.init_fun
-        self._epsilon  = self.param("epsilon", init, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
+        if isinstance(self.M, HashableArray):
+            self._epsilon  = tuple([self.param("epsilon_{}".format(i), init, (self.hilbert.local_size, np.asarray(self.M)[i], i+1), self.dtype) for i in range(self.M.shape[0])])
+        else:
+            self._epsilon  = self.param("epsilon", init, (self.hilbert.local_size, self.M, int(self.hilbert.size * (self.hilbert.size + 1)/2)), self.dtype)
         if self.apply_fast_update:
             self._saved_configs = self.variable("intermediates_cache", "samples", lambda : None)
             self._saved_context_product = self.variable("intermediates_cache", "context_prod", lambda : None)
@@ -161,26 +166,44 @@ class ARqGPSFull(AbstractARqGPS):
 def _compute_conditional(model: ARqGPSFull, n_spins: Array, inputs: Array, index: int,
                          update_args: Optional[Tuple[Array, Array, Array]]=None,
                          saved_context_prod: Optional[Array]=None) -> Union[Array, Array, Array]:
-    # Get the epsilon sub-tensor for the current index
-    lower_index = (index * (index+1))//2
+    if isinstance(model._epsilon, tuple):
+        input_param = model._epsilon[index][:,:,-1]
+    else:
+        # Get the epsilon sub-tensor for the current index
+        lower_index = (index * (index+1))//2
 
-    # Retrieve input parameters
-    input_param = model._epsilon[:,:,lower_index+index]
+        # Retrieve input parameters
+        input_param = model._epsilon[:,:,lower_index+index]
+
     input_param = jnp.expand_dims(input_param, axis=0) # (1, D, M)
 
     if update_args is None:
-        local_epsilon = jax.lax.dynamic_slice_in_dim(model._epsilon, lower_index, model.hilbert.size, axis=-1)
+        if isinstance(model._epsilon, tuple):
+            # Currently, We want this function to be callable with index < 0 for _init_cache function
+            if index < 0:
+                proper_index = 0
+            else:
+                proper_index = index
+            inputs = inputs[:,:proper_index+1]
+            local_epsilon = model._epsilon[proper_index]
+        else:
+            local_epsilon = jax.lax.dynamic_slice_in_dim(model._epsilon, lower_index, model.hilbert.size, axis=-1)
         # Compute product of parameters over j<index
         context_param = jnp.expand_dims(local_epsilon, axis=0) # (1, D, M, L)
         inputs_expanded = jnp.expand_dims(inputs, axis=(1,2)) # (B, 1, 1, L)
         context_val = jnp.take_along_axis(context_param, inputs_expanded, axis=1).reshape((-1, *local_epsilon.shape[-2:])) # (B, M, L)
+
         # Apply masking for sites > index
-        context_val = jnp.where(jnp.arange(model.hilbert.size) >= index, 1., context_val)
+        context_val = jnp.where(jnp.arange(local_epsilon.shape[-1]) >= index, 1., context_val)
         context_prod = jnp.prod(context_val, axis=-1) # (B, M)
     else:
         old_occupancy, new_occupancy, site_indices = update_args
-        update = (model._epsilon[new_occupancy,:,site_indices+lower_index])
-        update /= (model._epsilon[old_occupancy,:,site_indices+lower_index])
+        if isinstance(model._epsilon, tuple):
+            update = (model._epsilon[index][new_occupancy,:,site_indices])
+            update /= (model._epsilon[index][old_occupancy,:,site_indices])
+        else:
+            update = (model._epsilon[new_occupancy,:,site_indices+lower_index])
+            update /= (model._epsilon[old_occupancy,:,site_indices+lower_index])
         # Apply masking for sites > index
         update = jnp.where(jnp.expand_dims(site_indices >= index, axis=-1), 1., update)
         context_prod = update.prod(axis=1) * saved_context_prod
@@ -250,12 +273,26 @@ def _conditionals(model: ARqGPSFull, inputs: Array, update_args: Optional[Tuple[
     batch_size = inputs.shape[0]
     n_spins = jnp.zeros((batch_size, model.hilbert.local_size), jnp.int32)
     indices = jnp.arange(model.hilbert.size)
-    _, value = jax.lax.scan(
-        _scan_fun,
-        n_spins,
-        indices
-    )
-    log_psi, context_product = value
+    if isinstance(model._epsilon, tuple):
+        log_psi = None
+        context_product = None
+        for i in range(len(indices)):
+            n_spins, value = _scan_fun(n_spins, i)
+            if log_psi is None:
+                log_psi = jnp.expand_dims(value[0], axis=0)
+            else:
+                log_psi = jnp.append(log_psi, jnp.expand_dims(value[0], axis=0), axis=0)
+            if context_product is None:
+                context_product = jnp.expand_dims(value[1], axis=0)
+            else:
+                context_product = jnp.append(context_product, jnp.expand_dims(value[1], axis=0), axis=0)
+    else:
+        _, value = jax.lax.scan(
+            _scan_fun,
+            n_spins,
+            indices
+        )
+        log_psi, context_product = value
     log_psi = jnp.transpose(log_psi, [1, 0, 2])
     context_product = jnp.transpose(context_product, [1, 0, 2])
     return log_psi, context_product # (B, L, D), (B, L, M)

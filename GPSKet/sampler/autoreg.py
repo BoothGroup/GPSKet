@@ -3,7 +3,7 @@ import numpy as np
 from jax import numpy as jnp
 from functools import partial
 from netket.sampler import Sampler, SamplerState
-from netket.utils import struct
+from netket.utils import struct, HashableArray
 from netket.utils.types import PRNGKeyT
 
 
@@ -132,11 +132,27 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         scan_init = (indices, masks, plaquettes)
     else:
         scan_init = indices
-    (σ, _, _), _ = jax.lax.scan(
-        scan_fun,
-        (σ, cache, key_scan),
-        scan_init,
-    )
+
+    use_scan = True
+    if hasattr(model, 'M'):
+        if isinstance(model.M, HashableArray):
+            use_scan = False
+
+    if use_scan:
+        (σ, _, _), _ = jax.lax.scan(
+            scan_fun,
+            (σ, cache, key_scan),
+            scan_init,
+        )
+    else:
+        for i in range(sampler.hilbert.size):
+            if hasattr(model, 'plaquettes'):
+                masks = np.asarray(model.masks, np.int32)
+                plaquettes = np.asarray(model.plaquettes, np.int32)
+                scan_init = (indices, masks, plaquettes)
+                (σ, cache, key_scan), _ = scan_fun((σ, cache, key_scan), (i, np.asarray(model.masks, np.int32)[i], np.asarray(model.plaquettes, np.int32)[i]))
+            else:
+                (σ, cache, key_scan), _ = scan_fun((σ, cache, key_scan), i)
 
     # Apply symmetries
     if type(model.apply_symmetries) == tuple:
