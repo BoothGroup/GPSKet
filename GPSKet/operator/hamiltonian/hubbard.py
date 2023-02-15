@@ -15,7 +15,7 @@ class FermiHubbard(FermionicDiscreteOperator):
     def __init__(self, hilbert: FermionicDiscreteHilbert, edges: List[Tuple[int, int]], U: float=0.0, t: Union[float, List[float]]=1.):
         super().__init__(hilbert)
         self.U = U
-        self.edges = np.array(edges)
+        self.edges = np.array(edges, dtype=int).reshape((-1,2))
         if isinstance(t, List):
             self.t = np.array(t)
         else:
@@ -146,16 +146,17 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
                 )
                 return multiplicator
 
-            def hopping_loop(index, carry):
-                edge = edges[index]
+            def hopping_loop(index):
+                edge = edges[index, :]
                 value = apply_hopping(edge[0], edge[1])
                 value += apply_hopping(edge[1], edge[0])
                 value *= -t[index]
-                return carry+value
-            return jax.lax.fori_loop(0, edges.shape[0], hopping_loop, 0.)
+                return value
+            return jnp.sum(jax.vmap(hopping_loop)(jnp.arange(edges.shape[0])))
 
-        local_en += get_hopping_term(1, up_count)
-        local_en += get_hopping_term(2, down_count)
+        if edges.shape[0] > 0:
+            local_en += get_hopping_term(1, up_count)
+            local_en += get_hopping_term(2, down_count)
 
         return local_en
     return nkjax.vmap_chunked(vmap_fun, chunk_size=chunk_size)(samples)
