@@ -9,6 +9,7 @@ __all__ = [
     "models",
     "nn",
     "operator",
+    "optimizer",
     "sampler",
     "hilbert",
     "driver",
@@ -19,6 +20,7 @@ __all__ = [
 from . import models
 from . import nn
 from . import operator
+from . import optimizer
 from . import sampler
 from . import hilbert
 from . import driver
