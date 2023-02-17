@@ -27,6 +27,7 @@ class SRRMSProp(AbstractLinearPreconditioner):
     ):
         self.qgt_constructor = qgt
         self.qgt_kwargs = kwargs
+        assert (diag_shift >= 0.0) and (diag_shift <= 1.0)
         self.diag_shift = diag_shift
         self.decay = decay
         self.eps = eps
@@ -61,7 +62,7 @@ class SRRMSProp(AbstractLinearPreconditioner):
 
         # Compute diagonal shift and apply it to S matrix
         diag = jnp.diag(jnp.sqrt(nu_hat) + self.eps)
-        S = S + self.diag_shift*diag
+        S = (1-self.diag_shift)*S + self.diag_shift*diag
 
         # Solve system
         x0 = self.solver(S, gradient)
