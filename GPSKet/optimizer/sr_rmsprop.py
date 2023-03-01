@@ -1,13 +1,12 @@
-import jax
 import jax.numpy as jnp
-import netket.jax as nkjax
+from jax.tree_util import tree_map
 from dataclasses import dataclass
-from typing import Callable, Optional, Any
-from netket.utils.types import PyTree, Scalar, ScalarOrSchedule
+from typing import Callable, Optional
+from netket.utils.types import PyTree, Scalar
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner
-from netket.optimizer.qgt import QGTJacobianDense
 from .solvers import pinv
+from .qgt import QGTJacobianDenseRMSProp
 
 
 @dataclass
@@ -15,11 +14,11 @@ class SRRMSProp(AbstractLinearPreconditioner):
 
     def __init__(
         self,
-        params: PyTree,
-        qgt: QGTJacobianDense,
+        params_structure: PyTree,
+        qgt: Callable = QGTJacobianDenseRMSProp,
         solver: Callable = pinv,
         *,
-        diag_shift: ScalarOrSchedule = 0.01,
+        diag_shift: Scalar = 0.01,
         decay: Scalar = 0.9,
         eps: Scalar = 1e-8,
         initial_scale: Scalar = 0.0,
@@ -33,39 +32,40 @@ class SRRMSProp(AbstractLinearPreconditioner):
         self.eps = eps
         super().__init__(solver)
 
-        params, _ = nkjax.tree_ravel(params)
-        self._nu = jnp.full_like(params, initial_scale)
-        del params
+        self._ema = tree_map(
+            lambda p: jnp.full(p.shape, initial_scale, p.dtype),
+            params_structure
+        )
+        del params_structure
 
-    def lhs_constructor(self, vstate: VariationalState, step: Optional[Scalar] = None):
+    def lhs_constructor(self, vstate: VariationalState, ema: PyTree, step: Optional[Scalar] = None):
         return self.qgt_constructor(
             vstate,
-            diag_shift=None,
-            diag_scale=None,
+            ema,
+            diag_shift=self.diag_shift,
+            eps=self.eps,
             **self.qgt_kwargs
         )
 
     def __call__(self, vstate: VariationalState, gradient: PyTree, step: Optional[Scalar] = None) -> PyTree:
-        # Ravel gradient
-        gradient, unravel_fun = nkjax.tree_ravel(gradient)
-
-        # Compute S matrix
-        self._lhs = self.lhs_constructor(vstate, step)
-        S = self._lhs.to_dense()
-
-        # Update moving average
-        self._nu = self.decay*self._nu + (1-self.decay)*gradient**2
+        # Update exponential moving average
+        self._ema = tree_map(
+            lambda nu, g: self.decay*nu + (1-self.decay)*g**2,
+            self._ema,
+            gradient
+        )
 
         # Compute bias correction
         t = step+1
-        nu_hat = self._nu / (1-self.decay**t)
+        ema_hat = tree_map(
+            lambda nu: nu / (1-self.decay**t),
+            self._ema
+        )
 
-        # Compute diagonal shift and apply it to S matrix
-        diag = jnp.diag(jnp.sqrt(nu_hat) + self.eps)
-        S = (1-self.diag_shift)*S + self.diag_shift*diag
+        # Compute S matrix
+        self._lhs = self.lhs_constructor(vstate, ema_hat, step)
 
         # Solve system
-        x0 = self.solver(S, gradient)
-        self.x0 = unravel_fun(x0)
+        self.x0, self.info = self._lhs.solve(self.solver, gradient)
 
         return self.x0
