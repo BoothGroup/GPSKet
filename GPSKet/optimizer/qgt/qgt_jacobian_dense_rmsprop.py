@@ -5,13 +5,19 @@ from flax import struct
 from typing import Optional, Union
 from netket.utils import mpi
 from netket.nn import split_array_mpi
-from netket.utils.types import PyTree
+from netket.utils.types import PyTree, Scalar
 from netket.optimizer import LinearOperator
 from netket.optimizer.linear_operator import Uninitialized
 from netket.optimizer.qgt.common import check_valid_vector_type
 from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
-from netket.optimizer.qgt.qgt_jacobian_dense_logic import vec_to_real, mat_vec
+from netket.optimizer.qgt.qgt_jacobian_dense_logic import vec_to_real
 
+
+def mat_vec(v: PyTree, O: PyTree, diag_shift: Scalar, ema: PyTree, eps: Scalar) -> PyTree:
+    w = O @ v
+    res = jnp.tensordot(w.conj(), O, axes=w.ndim).conj()
+    res = mpi.mpi_sum_jax(res)[0]
+    return (1-diag_shift) * res + diag_shift * (jnp.sqrt(ema) + eps) * v
 
 def QGTJacobianDenseRMSProp(
     vstate,
@@ -120,7 +126,8 @@ def _matmul(
     if self.mode != "holomorphic" and not self._in_solve:
         vec, reassemble = vec_to_real(vec)
 
-    result = mat_vec(vec, self.O, self.diag_shift)
+    ema, _ = nkjax.tree_ravel(self.ema)
+    result = mat_vec(vec, self.O, self.diag_shift, ema, self.eps)
 
     if reassemble is not None:
         result = reassemble(result)
