@@ -36,7 +36,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
     # Pad argument is just a dummy at the moment,
     # TODO: include padding for unconstrained Hilbert spaces
     def get_conn_flattened(self, x, sections, pad=True):
-        assert(not pad or self.hilbert._has_constraint)
+        assert(not pad or self.hilbert.constrained)
 
         x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
                                                          sections, self.t_mat, self.eri_mat)
@@ -206,7 +206,13 @@ def get_parity_multiplicator_hop(update_sites, cummulative_el_count):
     # Type promotion is important, gives incorrect results if not cast to unsigned int
     return (jnp.int32(1) - 2 * (parity_count & 1))
 
-def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
+"""
+If the flag return_local_RDMs is set to true, this function also returns objects resembling the 1-RDMS and 2-RDMS for the samples.
+In particular, two t_RDM and eri_RDM are evaluated for each sample which describe the linear dependency
+of the local energy on the t_mat and eri_mat, in the sense that local_en = np.sum(t_mat * t_RDM) + np.sum(eri_mat * eri_RDM).
+Storing these can be useful to interpolate between different calculations with analytic continuation type approaches.
+"""
+def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=False, chunk_size=None, return_local_RDMs=False):
     t = args[0]
     eri = args[1]
 
@@ -237,6 +243,42 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
         local_en += 0.5 * jnp.sum(eri[up_occ_inds, :, :, up_occ_inds][:, up_unocc_inds, up_unocc_inds])
         local_en += 0.5 * jnp.sum(eri[down_occ_inds, down_occ_inds, :, :][:, down_occ_inds, down_occ_inds])
         local_en += 0.5 * jnp.sum(eri[down_occ_inds, :, :, down_occ_inds][:, down_unocc_inds, down_unocc_inds])
+
+        if return_local_RDMs:
+            t_RDM = jnp.zeros(t.shape, dtype = complex)
+            eri_RDM = jnp.zeros(eri.shape, dtype = complex)
+            t_RDM = t_RDM.at[up_occ_inds, up_occ_inds].add(1)
+            t_RDM = t_RDM.at[down_occ_inds, down_occ_inds].add(1)
+
+            def update_eri(count, val):
+                def inner_update(innercount, innerval):
+                    return innerval.at[up_occ_inds[count], up_occ_inds[count], down_occ_inds[innercount], down_occ_inds[innercount]].add(1)
+                return jax.lax.fori_loop(0, len(down_occ_inds), inner_update, val)
+            eri_RDM = jax.lax.fori_loop(0, len(up_occ_inds), update_eri, eri_RDM)
+
+            def update_eri(count, val):
+                def inner_update(innercount, innerval):
+                    return innerval.at[up_occ_inds[count], up_occ_inds[count], up_occ_inds[innercount], up_occ_inds[innercount]].add(0.5)
+                return jax.lax.fori_loop(0, len(up_occ_inds), inner_update, val)
+            eri_RDM = jax.lax.fori_loop(0, len(up_occ_inds), update_eri, eri_RDM)
+
+            def update_eri(count, val):
+                def inner_update(innercount, innerval):
+                    return innerval.at[up_occ_inds[count], up_unocc_inds[innercount], up_unocc_inds[innercount], up_occ_inds[count]].add(0.5)
+                return jax.lax.fori_loop(0, len(up_unocc_inds), inner_update, val)
+            eri_RDM = jax.lax.fori_loop(0, len(up_occ_inds), update_eri, eri_RDM)
+
+            def update_eri(count, val):
+                def inner_update(innercount, innerval):
+                    return innerval.at[down_occ_inds[count], down_occ_inds[count], down_occ_inds[innercount], down_occ_inds[innercount]].add(0.5)
+                return jax.lax.fori_loop(0, len(down_occ_inds), inner_update, val)
+            eri_RDM = jax.lax.fori_loop(0, len(down_occ_inds), update_eri, eri_RDM)
+
+            def update_eri(count, val):
+                def inner_update(innercount, innerval):
+                    return innerval.at[down_occ_inds[count], down_unocc_inds[innercount], down_unocc_inds[innercount], down_occ_inds[count]].add(0.5)
+                return jax.lax.fori_loop(0, len(down_unocc_inds), inner_update, val)
+            eri_RDM = jax.lax.fori_loop(0, len(down_occ_inds), update_eri, eri_RDM)
 
         # The following part evaluates the contributions from the connected configurations.
 
@@ -280,9 +322,32 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
             value += jnp.sum(eri[i, a, down_occ_inds, down_occ_inds])
             value += 0.5 * jnp.sum(eri[i, up_unocc_inds, up_unocc_inds, a])
             value -= 0.5 * jnp.sum(eri[up_occ_inds, a, i, up_occ_inds])
-            return value * amp_ratio * parity_multiplicator
+            if return_local_RDMs:
+                t_contribution = amp_ratio * parity_multiplicator
+                eri_contribution_1 = jnp.zeros((eri.shape[2], eri.shape[3]), dtype=complex)
+                eri_contribution_1 = eri_contribution_1.at[up_occ_inds, up_occ_inds].add(t_contribution)
+                eri_contribution_1 = eri_contribution_1.at[down_occ_inds, down_occ_inds].add(t_contribution)
+                eri_contribution_2 = jnp.zeros((eri.shape[1], eri.shape[2]), dtype=complex)
+                eri_contribution_2 = eri_contribution_2.at[up_unocc_inds, up_unocc_inds].add(0.5 * t_contribution)
+                eri_contribution_3 = jnp.zeros((eri.shape[0], eri.shape[3]), dtype=complex)
+                eri_contribution_3 = eri_contribution_3.at[up_occ_inds, up_occ_inds].add(-0.5 * t_contribution)
+                return value * t_contribution, t_contribution, eri_contribution_1, eri_contribution_2, eri_contribution_3
+            else:
+                return value * amp_ratio * parity_multiplicator
 
-        local_en += jnp.sum(jax.vmap(jax.vmap(get_one_body_term_up, in_axes=(None, 0)), in_axes=(0, None))(up_occ_inds, up_unocc_inds))
+        if return_local_RDMs:
+            val = jax.vmap(jax.vmap(get_one_body_term_up, in_axes=(None, 0)), in_axes=(0, None))(up_occ_inds, up_unocc_inds)
+            local_en += jnp.sum(val[0])
+            t_RDM = t_RDM.at[jnp.ix_(up_occ_inds, up_unocc_inds)].add(val[1])
+            eri_RDM = eri_RDM.at[jnp.ix_(up_occ_inds, up_unocc_inds, jnp.arange(eri_RDM.shape[2]), jnp.arange(eri_RDM.shape[3]))].add(val[2])
+
+            ix = jnp.ix_(up_occ_inds, jnp.arange(eri_RDM.shape[1]), jnp.arange(eri_RDM.shape[2]), up_unocc_inds)
+            eri_RDM = eri_RDM.at[ix].add(jnp.transpose(val[3], axes=(0, 2, 3, 1)))
+
+            ix = jnp.ix_(jnp.arange(eri_RDM.shape[1]), up_unocc_inds, up_occ_inds, jnp.arange(eri_RDM.shape[2]))
+            eri_RDM = eri_RDM.at[ix].add(jnp.transpose(val[4], axes=(2, 1, 0, 3)))
+        else:
+            local_en += jnp.sum(jax.vmap(jax.vmap(get_one_body_term_up, in_axes=(None, 0)), in_axes=(0, None))(up_occ_inds, up_unocc_inds))
 
         def get_one_body_term_down(i, a):
             # Updated config at update sites
@@ -300,9 +365,30 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
             value += jnp.sum(eri[i, a, up_occ_inds, up_occ_inds])
             value += 0.5 * jnp.sum(eri[i, down_unocc_inds, down_unocc_inds, a])
             value -= 0.5 * jnp.sum(eri[down_occ_inds, a, i, down_occ_inds])
-            return value * amp_ratio * parity_multiplicator
+            if return_local_RDMs:
+                t_contribution = amp_ratio * parity_multiplicator
+                eri_contribution_1 = jnp.zeros((eri.shape[2], eri.shape[3]), dtype=complex)
+                eri_contribution_1 = eri_contribution_1.at[down_occ_inds, down_occ_inds].add(t_contribution)
+                eri_contribution_1 = eri_contribution_1.at[up_occ_inds, up_occ_inds].add(t_contribution)
+                eri_contribution_2 = jnp.zeros((eri.shape[1], eri.shape[2]), dtype=complex)
+                eri_contribution_2 = eri_contribution_2.at[down_unocc_inds, down_unocc_inds].add(0.5 * t_contribution)
+                eri_contribution_3 = jnp.zeros((eri.shape[0], eri.shape[3]), dtype=complex)
+                eri_contribution_3 = eri_contribution_3.at[down_occ_inds, down_occ_inds].add(-0.5 * t_contribution)
+                return value * t_contribution, t_contribution, eri_contribution_1, eri_contribution_2, eri_contribution_3
+            else:
+                return value * amp_ratio * parity_multiplicator
 
-        local_en += jnp.sum(jax.vmap(jax.vmap(get_one_body_term_down, in_axes=(None, 0)), in_axes=(0, None))(down_occ_inds, down_unocc_inds))
+        if return_local_RDMs:
+            val = jax.vmap(jax.vmap(get_one_body_term_down, in_axes=(None, 0)), in_axes=(0, None))(down_occ_inds, down_unocc_inds)
+            local_en += jnp.sum(val[0])
+            t_RDM = t_RDM.at[jnp.ix_(down_occ_inds, down_unocc_inds)].add(val[1])
+            eri_RDM = eri_RDM.at[jnp.ix_(down_occ_inds, down_unocc_inds, jnp.arange(eri_RDM.shape[2]), jnp.arange(eri_RDM.shape[3]))].add(val[2])
+            ix = jnp.ix_(down_occ_inds, jnp.arange(eri_RDM.shape[1]), jnp.arange(eri_RDM.shape[2]), down_unocc_inds)
+            eri_RDM = eri_RDM.at[ix].add(jnp.transpose(val[3], axes=(0, 2, 3, 1)))
+            ix = jnp.ix_(jnp.arange(eri_RDM.shape[1]), down_unocc_inds, down_occ_inds, jnp.arange(eri_RDM.shape[2]))
+            eri_RDM = eri_RDM.at[ix].add(jnp.transpose(val[4], axes=(2, 1, 0, 3)))
+        else:
+            local_en += jnp.sum(jax.vmap(jax.vmap(get_one_body_term_down, in_axes=(None, 0)), in_axes=(0, None))(down_occ_inds, down_unocc_inds))
 
         def two_body_up_up_occ(index_outer, val_outer):
             i = up_occ_inds[index_outer]
@@ -341,11 +427,19 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
                     log_amp_connected = get_connected_log_amp(new_occ, update_sites)
                     amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
 
-                    return (eri[i,a,j,b] * parity_multiplicator * amp_ratio)
-                inner_contraction = jax.vmap(jax.vmap(inner_loop, in_axes=(None, 0)), in_axes=(0, None))(occ_inds_outer_removed, unocc_inds_outer_removed)
-                return val_inner + 0.5 * jnp.sum(inner_contraction)
+                    return (parity_multiplicator * amp_ratio)
+                inner_loops = jax.vmap(jax.vmap(inner_loop, in_axes=(None, 0)), in_axes=(0, None))(occ_inds_outer_removed, unocc_inds_outer_removed)
+                if return_local_RDMs:
+                    en = val_inner[0] + 0.5 * jnp.sum(eri[jnp.ix_(jnp.array([i]),jnp.array([a]),occ_inds_outer_removed,unocc_inds_outer_removed)] * inner_loops)
+                    eri_RDM_contrib = val_inner[1].at[jnp.ix_(jnp.array([i]),jnp.array([a]),occ_inds_outer_removed,unocc_inds_outer_removed)].add(0.5 * inner_loops)
+                    return en, eri_RDM_contrib
+                else:
+                    return val_inner + 0.5 * jnp.sum(eri[jnp.ix_(jnp.array([i]),jnp.array([a]),occ_inds_outer_removed,unocc_inds_outer_removed)] * inner_loops)
             return jax.lax.fori_loop(0, len(up_unocc_inds), two_body_up_up_unocc, val_outer)
-        local_en = jax.lax.fori_loop(0, len(up_occ_inds), two_body_up_up_occ, local_en)
+        if return_local_RDMs:
+            local_en, eri_RDM = jax.lax.fori_loop(0, len(up_occ_inds), two_body_up_up_occ, (local_en, eri_RDM))
+        else:
+            local_en = jax.lax.fori_loop(0, len(up_occ_inds), two_body_up_up_occ, local_en)
 
 
         def two_body_down_down_occ(index_outer, val_outer):
@@ -385,12 +479,19 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
                     log_amp_connected = get_connected_log_amp(new_occ, update_sites)
                     amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
 
-                    return (eri[i,a,j,b] * parity_multiplicator * amp_ratio)
-                inner_contraction = jax.vmap(jax.vmap(inner_loop, in_axes=(None, 0)), in_axes=(0, None))(occ_inds_outer_removed, unocc_inds_outer_removed)
-                return val_inner + 0.5 * jnp.sum(inner_contraction)
+                    return (parity_multiplicator * amp_ratio)
+                inner_loops = jax.vmap(jax.vmap(inner_loop, in_axes=(None, 0)), in_axes=(0, None))(occ_inds_outer_removed, unocc_inds_outer_removed)
+                if return_local_RDMs:
+                    en = val_inner[0] + 0.5 * jnp.sum(eri[jnp.ix_(jnp.array([i]),jnp.array([a]),occ_inds_outer_removed,unocc_inds_outer_removed)] * inner_loops)
+                    eri_RDM_contrib = val_inner[1].at[jnp.ix_(jnp.array([i]),jnp.array([a]),occ_inds_outer_removed,unocc_inds_outer_removed)].add(0.5 * inner_loops)
+                    return en, eri_RDM_contrib
+                else:
+                    return val_inner + 0.5 * jnp.sum(eri[jnp.ix_(jnp.array([i]),jnp.array([a]),occ_inds_outer_removed,unocc_inds_outer_removed)] * inner_loops)
             return jax.lax.fori_loop(0, len(down_unocc_inds), two_body_down_down_unocc, val_outer)
-        local_en = jax.lax.fori_loop(0, len(down_occ_inds), two_body_down_down_occ, local_en)
-
+        if return_local_RDMs:
+            local_en, eri_RDM = jax.lax.fori_loop(0, len(down_occ_inds), two_body_down_down_occ, (local_en, eri_RDM))
+        else:
+            local_en = jax.lax.fori_loop(0, len(down_occ_inds), two_body_down_down_occ, local_en)
 
 
         # Two body contribution (up, down)
@@ -439,13 +540,26 @@ def local_en_on_the_fly(n_elecs, logpsi, pars, samples, args, use_fast_update=Fa
                     log_amp_connected = get_connected_log_amp(new_occ_final, update_sites_final)
                     amp_ratio = jnp.squeeze(jnp.exp(log_amp_connected - log_amp))
 
-                    return (eri[i,a,j,b] * parity_multiplicator * amp_ratio)
-                inner_contraction = jax.vmap(jax.vmap(inner_loop, in_axes=(None, 0)), in_axes=(0, None))(down_occ_inds, down_unocc_inds)
-                return val_inner + jnp.sum(inner_contraction)
-            return jax.lax.fori_loop(0, len(up_unocc_inds), two_body_up_down_unocc, val_outer)
-        local_en = jax.lax.fori_loop(0, len(up_occ_inds), two_body_up_down_occ, local_en)
+                    return (parity_multiplicator * amp_ratio)
+                inner_loops = jax.vmap(jax.vmap(inner_loop, in_axes=(None, 0)), in_axes=(0, None))(down_occ_inds, down_unocc_inds)
+                if return_local_RDMs:
+                    en = val_inner[0] + jnp.sum(eri[jnp.ix_(jnp.array([i]),jnp.array([a]),down_occ_inds,down_unocc_inds)] * inner_loops)
+                    eri_RDM_contrib = val_inner[1].at[jnp.ix_(jnp.array([i]),jnp.array([a]),down_occ_inds,down_unocc_inds)].add(inner_loops)
+                    return en, eri_RDM_contrib
+                else:
+                    return val_inner + jnp.sum(eri[jnp.ix_(jnp.array([i]),jnp.array([a]),down_occ_inds,down_unocc_inds)] * inner_loops)
 
-        return local_en
+
+            return jax.lax.fori_loop(0, len(up_unocc_inds), two_body_up_down_unocc, val_outer)
+        if return_local_RDMs:
+            local_en, eri_RDM = jax.lax.fori_loop(0, len(up_occ_inds), two_body_up_down_occ, (local_en, eri_RDM))
+        else:
+            local_en = jax.lax.fori_loop(0, len(up_occ_inds), two_body_up_down_occ, local_en)
+
+        if return_local_RDMs:
+            return local_en, t_RDM, eri_RDM
+        else:
+            return local_en
     return nkjax.vmap_chunked(vmap_fun, chunk_size=chunk_size)(samples)
 
 @nk.vqs.get_local_kernel_arguments.dispatch
