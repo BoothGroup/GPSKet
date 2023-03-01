@@ -36,7 +36,7 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
     # Pad argument is just a dummy at the moment,
     # TODO: include padding for unconstrained Hilbert spaces
     def get_conn_flattened(self, x, sections, pad=True):
-        assert(not pad or self.hilbert._has_constraint)
+        assert(not pad or self.hilbert.constrained)
 
         x_primes, mels = self._get_conn_flattened_kernel(np.asarray(x, dtype = np.uint8),
                                                          sections, self.t_mat, self.eri_mat)
