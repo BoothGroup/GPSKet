@@ -66,7 +66,7 @@ def local_en_on_the_fly(states_to_local_indices, logpsi, pars, samples, args, us
             rel_occ = sample[acting_on_element]
             basis_index = jnp.sum(states_to_local_indices(rel_occ) * jnp.array([1,2]))
             # the way this is set up at the moment is only valid for Heisenberg models where at most one non-zero off-diagonal exists
-            off_diag_connected = jnp.array([0,2,1,3]) # indices of the non-zero off-diagonal element (or the diagonal index if no non-zero off-diagonal element)
+            off_diag_connected = jnp.array([0,2,1,3]) # indices of the non-zero off-diagonal element (or the diagonal index if no non-zero off-diagonal exists)
             def compute_element(connected_index):
                 mel = operator_element[basis_index, connected_index]
                 new_occ = 2 * jnp.array([connected_index % 2, connected_index // 2]) - 1. # map back to standard netket representation of spin configurations
