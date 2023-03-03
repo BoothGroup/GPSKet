@@ -1,1 +1,3 @@
 from .qgt_jacobian_dense_unique_samples import QGTJacobianDenseUniqueSamples
+from .qgt_jacobian_dense_rmsprop import QGTJacobianDenseRMSProp
+from .qgt_onthefly_rmsprop import QGTOnTheFlyRMSProp

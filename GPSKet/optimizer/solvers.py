@@ -1,9 +1,11 @@
-import jax
 import jax.numpy as jnp
+from netket.jax import tree_ravel
 
 
-@jax.jit
-def pinv(A, b):
-    A_inv = jnp.linalg.pinv(A, hermitian=True)
+def pinv(A, b, rcond=1e-12, x0=None):
+    del x0
+    A = A.to_dense()
+    b, unravel = tree_ravel(b)
+    A_inv = jnp.linalg.pinv(A, rcond=rcond, hermitian=True)
     x = jnp.dot(A_inv, b)
-    return x
+    return unravel(x), None
