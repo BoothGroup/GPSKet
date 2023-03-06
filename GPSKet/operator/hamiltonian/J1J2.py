@@ -12,16 +12,16 @@ from typing import Optional
 class HeisenbergOnTheFly(nk.operator.Heisenberg):
     pass
 
-def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True, total_sz=0.0, on_the_fly_en=False):
+def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True, total_sz=0.0, on_the_fly_en=False, pbc = True):
     if J2 != 0.:
         nb_order = 2
     else:
         nb_order = 1
 
     if Ly is None:
-        g = nk.graph.Chain(Lx, max_neighbor_order=nb_order)
+        g = nk.graph.Chain(Lx, max_neighbor_order=nb_order, pbc = pbc)
     else:
-        g = nk.graph.Grid([Lx, Ly], max_neighbor_order=nb_order)
+        g = nk.graph.Grid([Lx, Ly], max_neighbor_order=nb_order, pbc = pbc)
 
     hilbert = nk.hilbert.Spin(0.5, total_sz=total_sz, N=g.n_nodes)
 
