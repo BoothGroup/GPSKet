@@ -46,18 +46,14 @@ def get_J1_J2_Hamiltonian(Lx, Ly=None, J1=1., J2=0., sign_rule=True, total_sz=0.
 """
 This is a custom way of evaluating the expectation values for Heisenberg models.
 It can make use of the fast update functionality of the qGPS ansatz.
-Furthermore it requires less memory than the default netket implementation as connected
+Furthermore it can reduce the memory requirements compared to the default netket implementation as connected
 configurations are not all created at once but created on the fly.
 It can probably at one point also be extended beyond Heisenberg models but at the moment
 it explicitly requires that each operator in the Hamiltonian acts on a pair of spins
 and connects the test configuration to at most one other different configuration.
 """
 
-tensor_basis_mapping = jnp.array([[0,0], [1,0], [0,1], [1,1]], dtype=jnp.uint8)
-off_diag_connected = jnp.array([0,2,1,3], dtype=jnp.uint8)
-index_multiplicator = jnp.arange(1,3, dtype=jnp.uint8)
-
-def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
+def local_en_on_the_fly(states_to_local_indices, logpsi, pars, samples, args, use_fast_update=False, chunk_size=None):
     operators = args[0]
     acting_on = args[1]
     def vmap_fun(sample):
@@ -66,27 +62,24 @@ def local_en_on_the_fly(logpsi, pars, samples, args, use_fast_update=False, chun
             parameters = {**pars, **intermediates_cache}
         else:
             log_amp = logpsi(pars, jnp.expand_dims(sample, 0))
-        def scan_fun(carry, index):
-            acting_on_element = acting_on[index]
-            operator_element = operators[index]
+        def inner_vmap(operator_element, acting_on_element):
             rel_occ = sample[acting_on_element]
-            basis_index = jnp.sum(rel_occ.astype(jnp.uint8)*index_multiplicator)
+            basis_index = jnp.sum(states_to_local_indices(rel_occ) * jnp.array([1,2]))
             # the way this is set up at the moment is only valid for Heisenberg models where at most one non-zero off-diagonal exists
+            off_diag_connected = jnp.array([0,2,1,3]) # indices of the non-zero off-diagonal element (or the diagonal index if no non-zero off-diagonal exists)
             def compute_element(connected_index):
                 mel = operator_element[basis_index, connected_index]
-                new_occ = 2*tensor_basis_mapping[connected_index]-1.
+                new_occ = 2 * jnp.array([connected_index % 2, connected_index // 2]) - 1. # map back to standard netket representation of spin configurations
                 if use_fast_update:
                     log_amp_connected = logpsi(parameters, jnp.expand_dims(new_occ, 0), update_sites=jnp.expand_dims(acting_on_element, 0))
                 else:
                     updated_config = sample.at[acting_on_element].set(new_occ)
                     log_amp_connected = logpsi(pars, jnp.expand_dims(updated_config, 0))
-                return jnp.squeeze(mel * jnp.exp(log_amp_connected - log_amp)).astype(complex)
-            off_diag_index = off_diag_connected[basis_index]
-            off_diag = jax.lax.cond(off_diag_index != basis_index, compute_element, lambda x: jnp.array(0, dtype=complex), off_diag_index)
-            value = operator_element[basis_index, basis_index] + off_diag
-            return (carry + value, None)
-        return jax.lax.scan(scan_fun, 0., jnp.arange(acting_on.shape[0]))[0]
-
+                return jnp.squeeze(mel * jnp.exp(log_amp_connected - log_amp))
+            # This has a bit of overhead as there is no good way of shortcutting if the non-zero element is the diagonal
+            off_diag = jnp.where(off_diag_connected[basis_index] != basis_index, compute_element(off_diag_connected[basis_index]), 0.)
+            return off_diag + operator_element[basis_index, basis_index]
+        return jnp.sum(jax.vmap(inner_vmap)(operators, acting_on))
     return nkjax.vmap_chunked(vmap_fun, chunk_size=chunk_size)(samples)
 
 @nk.vqs.get_local_kernel_arguments.dispatch
@@ -102,4 +95,4 @@ def get_local_kernel(vstate: nk.vqs.MCState, op: HeisenbergOnTheFly, chunk_size:
         use_fast_update = vstate.model.apply_fast_update
     except:
         use_fast_update = False
-    return nkjax.HashablePartial(local_en_on_the_fly, use_fast_update=use_fast_update, chunk_size=chunk_size)
+    return nkjax.HashablePartial(local_en_on_the_fly, op.hilbert.states_to_local_indices, use_fast_update=use_fast_update, chunk_size=chunk_size)
