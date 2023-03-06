@@ -10,14 +10,7 @@ from netket.optimizer import LinearOperator
 from netket.optimizer.linear_operator import Uninitialized
 from netket.optimizer.qgt.common import check_valid_vector_type
 from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
-from netket.optimizer.qgt.qgt_jacobian_dense_logic import vec_to_real
 
-
-def mat_vec(v: PyTree, O: PyTree, diag_shift: Scalar, ema: PyTree, eps: Scalar) -> PyTree:
-    w = O @ v
-    res = jnp.tensordot(w.conj(), O, axes=w.ndim).conj()
-    res = mpi.mpi_sum_jax(res)[0]
-    return (1-diag_shift) * res + diag_shift * (jnp.sqrt(ema) + eps) * v
 
 def QGTJacobianDenseRMSProp(
     vstate,
@@ -92,14 +85,54 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
     _in_solve: bool = struct.field(pytree_node=False, default=False)
     _params_structure: PyTree = struct.field(pytree_node=False, default=Uninitialized)
 
+    @jax.jit
     def __matmul__(self, vec: Union[PyTree, jnp.ndarray]) -> Union[PyTree, jnp.ndarray]:
-        return _matmul(self, vec)
+        if not hasattr(vec, "ndim") and not self._in_solve:
+            check_valid_vector_type(self._params_structure, vec)
 
+        vec, reassemble = convert_tree_to_dense_format(
+            vec, self.mode, disable=self._in_solve
+        )
+
+        ema, _ = nkjax.tree_ravel(self.ema)
+        result = mat_vec(vec, self.O, self.diag_shift, ema, self.eps)
+
+        return reassemble(result)
+
+    @jax.jit
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
-        return _solve(self, solve_fun, y, x0=x0)
+        if not hasattr(y, "ndim"):
+            check_valid_vector_type(self._params_structure, y)
 
+        y, reassemble = convert_tree_to_dense_format(y, self.mode)
+
+        if x0 is not None:
+            x0, _ = convert_tree_to_dense_format(x0, self.mode)
+
+        insolve_self = self.replace(_in_solve=True)
+        out, info = solve_fun(insolve_self, y, x0=x0)
+
+        return reassemble(out), info
+
+    @jax.jit
     def to_dense(self) -> jnp.ndarray:
-        return _to_dense(self)
+        """
+        Convert the lazy matrix representation to a dense matrix representation.
+
+        Returns:
+            A dense matrix representation of this S matrix.
+        """
+        # Concatenate samples with real/imaginary dimension
+        O = self.O
+        O = O.reshape(-1, O.shape[-1])
+
+        # Compute S matrix
+        S = mpi.mpi_sum_jax(O.conj().T @ O)[0]
+
+        # Compute diagonal shift and apply it to S matrix
+        ema, _ = nkjax.tree_ravel(self.ema)
+        diag = jnp.diag(jnp.sqrt(ema) + self.eps)
+        return (1-self.diag_shift)*S + self.diag_shift * diag
 
     def __repr__(self):
         return (
@@ -111,72 +144,29 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
 ########################################################################################
 
 
-@jax.jit
-def _matmul(
-    self: QGTJacobianDenseRMSPropT, vec: Union[PyTree, jnp.ndarray]
-) -> Union[PyTree, jnp.ndarray]:
+def mat_vec(v: PyTree, O: PyTree, diag_shift: Scalar, ema: PyTree, eps: Scalar) -> PyTree:
+    w = O @ v
+    res = jnp.tensordot(w.conj(), O, axes=w.ndim).conj()
+    res = mpi.mpi_sum_jax(res)[0]
+    return (1-diag_shift) * res + diag_shift * (jnp.sqrt(ema) + eps) * v
 
-    unravel = None
-    if not hasattr(vec, "ndim") and not self._in_solve:
-        check_valid_vector_type(self._params_structure, vec)
-        vec, unravel = nkjax.tree_ravel(vec)
+def convert_tree_to_dense_format(vec, mode, *, disable=False):
+    """
+    Converts an arbitrary PyTree/vector which might be real/complex
+    to the dense-(maybe-real)-vector used for QGTJacobian.
 
-    # Real-imaginary split RHS in R→R and R→C modes
-    reassemble = None
-    if self.mode != "holomorphic" and not self._in_solve:
-        vec, reassemble = vec_to_real(vec)
+    The format is dictated by the sequence of operations chosen by
+    `nk.jax.jacobian(..., dense=True)`. As `nk.jax.jacobian` first
+    converts the pytree of parameters to real and then concatenates
+    real and imaginary terms with a tree_ravel, we must do the same
+    in here.
+    """
+    unravel = lambda x: x
+    reassemble = lambda x: x
+    if not disable:
+        if mode != "holomorphic":
+            vec, reassemble = nkjax.tree_to_real(vec)
+        if not hasattr(vec, "ndim"):
+            vec, unravel = nkjax.tree_ravel(vec)
 
-    ema, _ = nkjax.tree_ravel(self.ema)
-    result = mat_vec(vec, self.O, self.diag_shift, ema, self.eps)
-
-    if reassemble is not None:
-        result = reassemble(result)
-
-    if unravel is not None:
-        result = unravel(result)
-
-    return result
-
-
-@jax.jit
-def _solve(
-    self: QGTJacobianDenseRMSPropT, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None
-) -> PyTree:
-    if not hasattr(y, "ndim"):
-        check_valid_vector_type(self._params_structure, y)
-
-    # Ravel input PyTrees, record unravelling function too
-    y, unravel = nkjax.tree_ravel(y)
-
-    if self.mode != "holomorphic":
-        y, reassemble = vec_to_real(y)
-
-    if x0 is not None:
-        x0, _ = nkjax.tree_ravel(x0)
-        if self.mode != "holomorphic":
-            x0, _ = vec_to_real(x0)
-
-    insolve_self = self.replace(_in_solve=True)
-
-    out, info = solve_fun(insolve_self, y, x0=x0)
-
-    if self.mode != "holomorphic":
-        out = reassemble(out)
-
-    return unravel(out), info
-
-
-@jax.jit
-def _to_dense(self: QGTJacobianDenseRMSPropT) -> jnp.ndarray:
-    # Concatenate samples with real/imaginary dimension
-    O = self.O
-    O = O.reshape(-1, O.shape[-1])
-
-    # Compute S matrix
-    S = mpi.mpi_sum_jax(O.conj().T @ O)[0]
-
-    # Compute diagonal shift and apply it to S matrix
-    ema, _ = nkjax.tree_ravel(self.ema)
-    diag = jnp.diag(jnp.sqrt(ema) + self.eps)
-    S = (1-self.diag_shift)*S + self.diag_shift * diag
-    return S
+    return vec, lambda x: reassemble(unravel(x))
