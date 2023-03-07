@@ -22,6 +22,7 @@ class minSRVMC(VMC):
                  solver=lambda A, b: jnp.linalg.lstsq(A, b, rcond=1.e-12)[0], diag_shift: float = 0., **kwargs):
         super().__init__(*args, **kwargs)
         assert(not (mode is not None and holomorphic is not None))
+        assert (diag_shift >= 0.) and (diag_shift <= 1.)
         if mode is None:
             self.mode = choose_jacobian_mode(self.state._apply_fun, self.state.parameters,
                                              self.state.state, self.state.samples, mode=mode,
@@ -88,7 +89,7 @@ def compute_update(loc_ens, O, counts, solver, diag_shift):
 
     loss_grad = jnp.dot(O.T, loc_ens_centered).real
 
-    OO = O.dot(O.conj().T) + diag_shift * jnp.eye(O.shape[0])
+    OO = (1-diag_shift) * O.dot(O.conj().T) + diag_shift * jnp.eye(O.shape[0])
 
     OO_epsilon = solver(OO, loc_ens_centered)
 
