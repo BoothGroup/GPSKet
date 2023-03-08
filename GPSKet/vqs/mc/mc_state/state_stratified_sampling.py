@@ -26,7 +26,7 @@ into a determinisitic evaluation over a fixed set, and a sampled estimate over t
 At the moment this is only an implementation for quick testing which is very slow.
 The number of samples passed is the number of samples taken in addition to the deterministic set."""
 class MCStateStratifiedSampling(MCStateUniqueSamples):
-    def __init__(self, deterministic_samples, N_total, *args, rand_norm=False, number_random_samples=None, renormalize=True, **kwargs):
+    def __init__(self, deterministic_samples, N_total, *args, rand_norm=True, number_random_samples=None, renormalize=True, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.n_sweeps = self.sampler.n_sweeps
@@ -107,6 +107,7 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
             log_prob_amps_deterministic =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(self.deterministic_samples)
             log_prob_amps_complement =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(samples_from_complement)
 
+            total_samples = _sum(len(log_prob_amps_complement))
             if self.renormalize: # Switch off for normalized models (e.g. autoregressive models)
                 # Renormalise the probability amplitudes for numerical stability
                 rescale_shift = _mpi_max_jax(jnp.max(jnp.concatenate((log_prob_amps_deterministic, log_prob_amps_complement))))[0]
@@ -115,7 +116,6 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
                 # Contribution of the determinisitc set to the norm
                 norm_deterministic = _sum(jnp.exp(log_prob_amps_deterministic))
 
-                total_samples = _sum(len(log_prob_amps_complement))
 
                 if self.rand_norm:
                     # Approximation to the norm correction from a uniformly sampled set
