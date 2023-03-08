@@ -25,7 +25,7 @@ class minSRVMC(VMC):
         assert (diag_shift >= 0.) and (diag_shift <= 1.)
         if mode is None:
             self.mode = choose_jacobian_mode(self.state._apply_fun, self.state.parameters,
-                                             self.state.state, self.state.samples, mode=mode,
+                                             self.state.state, self.state.samples,
                                              holomorphic=holomorphic)
         else:
             self.mode = mode
@@ -36,7 +36,7 @@ class minSRVMC(VMC):
     def _forward_and_backward(self):
         self.state.reset()
 
-        if isinstance(self.state, MCStateUniqueSamples):
+        if hasattr(self.state, "samples_with_counts"):
             samples, counts = self.state.samples_with_counts
         else:
             samples = self.state.samples
