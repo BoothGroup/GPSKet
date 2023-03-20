@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from dataclasses import dataclass
@@ -5,7 +6,6 @@ from typing import Callable, Optional
 from netket.utils.types import PyTree, Scalar
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner
-from .solvers import pinv
 from .qgt import QGTJacobianDenseRMSProp
 
 
@@ -16,7 +16,7 @@ class SRRMSProp(AbstractLinearPreconditioner):
         self,
         params_structure: PyTree,
         qgt: Callable = QGTJacobianDenseRMSProp,
-        solver: Callable = pinv,
+        solver: Callable = jax.scipy.sparse.linalg.cg,
         *,
         diag_shift: Scalar = 0.01,
         decay: Scalar = 0.9,
