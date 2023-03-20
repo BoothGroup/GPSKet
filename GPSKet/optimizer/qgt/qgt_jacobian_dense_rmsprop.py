@@ -13,9 +13,11 @@ from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
 
 from GPSKet.vqs import MCStateUniqueSamples
 
+from functools import partial
+
 def QGTJacobianDenseRMSProp(
-    vstate,
-    ema,
+    vstate=None,
+    ema=None,
     mode: str = None,
     holomorphic: bool = None,
     diag_shift=None,
@@ -25,6 +27,11 @@ def QGTJacobianDenseRMSProp(
 ) -> "QGTJacobianDenseRMSPropT":
     if mode is not None and holomorphic is not None:
         raise ValueError("Cannot specify both `mode` and `holomorphic`.")
+
+    if vstate is None:
+        return partial(QGTJacobianDenseRMSProp, mode=mode, holomorphic=holomorphic,
+                       diag_shift=diag_shift, eps=eps, chunk_size=chunk_size, **kwargs)
+
 
     assert diag_shift >= 0.0 and diag_shift <= 1.0
 
