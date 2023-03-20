@@ -49,8 +49,16 @@ class SRRMSProp(AbstractLinearPreconditioner):
 
     def __call__(self, vstate: VariationalState, gradient: PyTree, step: Optional[Scalar] = None) -> PyTree:
         # Update exponential moving average
+        def update_ema(nu, g):
+            if jnp.iscomplexobj(g):
+                # This assumes that the parameters are split into complex and real parts later on (done in the QGT implementation)
+                squared_g = (g.real**2 + 1.j * g.imag**2)
+            else:
+                squared_g = (g**2)
+            return self.decay*nu + (1-self.decay)* squared_g
+
         self._ema = tree_map(
-            lambda nu, g: self.decay*nu + (1-self.decay)*g**2,
+            update_ema,
             self._ema,
             gradient
         )
