@@ -51,7 +51,7 @@ def QGTJacobianDenseRMSProp(
         )
 
     if mode is "holomorphic":
-        raise ValueError("Mode cannot be holomorphic for the QGT with RMSProb diagonal shift")
+        raise ValueError("Mode cannot be holomorphic for the QGT with RMSProp diagonal shift")
 
     if chunk_size is None and hasattr(vstate, "chunk_size"):
         chunk_size = vstate.chunk_size
