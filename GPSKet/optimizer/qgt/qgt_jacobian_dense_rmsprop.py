@@ -50,7 +50,7 @@ def QGTJacobianDenseRMSProp(
             holomorphic=holomorphic,
         )
 
-    if mode is "holomorphic":
+    if mode == "holomorphic":
         raise ValueError("Mode cannot be holomorphic for the QGT with RMSProp diagonal shift")
 
     if chunk_size is None and hasattr(vstate, "chunk_size"):
@@ -100,7 +100,7 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
             vec, self.mode, disable=self._in_solve
         )
 
-        ema, _ = nkjax.tree_ravel(self.ema)
+        ema, _ = convert_tree_to_dense_format(self.ema, self.mode)
         result = mat_vec(vec, self.O, self.diag_shift, ema, self.eps)
 
         return reassemble(result)
@@ -136,7 +136,7 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
         S = mpi.mpi_sum_jax(O.conj().T @ O)[0]
 
         # Compute diagonal shift and apply it to S matrix
-        ema, _ = nkjax.tree_ravel(self.ema)
+        ema, _ = convert_tree_to_dense_format(self.ema, self.mode)
         diag = jnp.diag(jnp.sqrt(ema) + self.eps)
         return (1-self.diag_shift)*S + self.diag_shift * diag
 
