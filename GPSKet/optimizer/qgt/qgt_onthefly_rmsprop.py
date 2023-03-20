@@ -62,6 +62,10 @@ def QGTOnTheFlyRMSProp(
     if isinstance(vstate, ExactState):
         raise TypeError("ExactState is not supported. Use QGTJacobianDenseRMSProp instead.")
 
+    from GPSKet.vqs import MCStateUniqueSamples
+    if isinstance(vstate, MCStateUniqueSamples):
+        raise TypeError("Unique samples state with on-the-fly QGT is not supported.")
+
     if jnp.ndim(vstate.samples) == 2:
         samples = vstate.samples
     else:
@@ -70,7 +74,7 @@ def QGTOnTheFlyRMSProp(
     if chunk_size is not None:
         raise ValueError("Chunking is not support yet.")
     n_samples = samples.shape[0]
-    
+
     if chunk_size is None or chunk_size >= n_samples:
         mv_factory = mat_vec_factory
         chunking = False
@@ -116,7 +120,7 @@ class QGTOnTheFlyRMSPropT(LinearOperator):
 
     def __repr__(self):
         return f"QGTOnTheFlyRMSProp(diag_shift={self.diag_shift})"
-    
+
 ########################################################################################
 #####                                  QGT Logic                                   #####
 ########################################################################################

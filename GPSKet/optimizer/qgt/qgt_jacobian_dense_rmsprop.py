@@ -11,6 +11,7 @@ from netket.optimizer.linear_operator import Uninitialized
 from netket.optimizer.qgt.common import check_valid_vector_type
 from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
 
+from GPSKet.vqs import MCStateUniqueSamples
 
 def QGTJacobianDenseRMSProp(
     vstate,
@@ -33,6 +34,8 @@ def QGTJacobianDenseRMSProp(
     if isinstance(vstate, ExactState):
         samples = split_array_mpi(vstate._all_states)
         pdf = split_array_mpi(vstate.probability_distribution())
+    elif isinstance(vstate, MCStateUniqueSamples):
+        samples, pdf = vstate.samples_with_counts
     else:
         samples = vstate.samples
         pdf = None
@@ -138,7 +141,7 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
         return (
             f"QGTJacobianDenseRMSProp(diag_shift={self.diag_shift}, mode={self.mode})"
         )
-    
+
 ########################################################################################
 #####                                  QGT Logic                                   #####
 ########################################################################################
