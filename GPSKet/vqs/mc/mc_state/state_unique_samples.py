@@ -43,6 +43,8 @@ class MCStateUniqueSamples(nk.vqs.MCState):
         self.max_sampling_steps = max_sampling_steps
         if batch_size is None:
             self.batch_size = self.n_samples
+        else:
+            self.batch_size = batch_size
 
     def reset(self):
         self._samples = None
