@@ -63,7 +63,7 @@ if _rank == 0:
     else:
         loc_coeff = myhf.mo_coeff
         if basis_type != 1:
-            loc_coeff = lo.orth_ao(mol, 'meta_lowdin')
+            loc_coeff = lo.orth_ao(mol, 'meta_lowdin') # Using "lowdin" might improve the starting guess for a subsequent Boys localization
             if basis_type == 0:
                 localizer = lo.Boys(mol, loc_coeff)
                 localizer.verbose = 4
