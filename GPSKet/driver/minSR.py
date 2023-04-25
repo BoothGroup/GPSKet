@@ -25,7 +25,7 @@ class minSRVMC(VMC):
         assert (diag_shift >= 0.) and (diag_shift <= 1.)
         if mode is None:
             self.mode = choose_jacobian_mode(self.state._apply_fun, self.state.parameters,
-                                             self.state.state, self.state.samples,
+                                             self.state.model_state, self.state.samples,
                                              holomorphic=holomorphic)
         else:
             self.mode = mode
