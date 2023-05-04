@@ -18,22 +18,25 @@ class minSRVMC(VMC):
     """
     VMC driver utilizing the minSR updates as proposed in https://arxiv.org/abs/2302.01941
     """
-    def __init__(self, *args, mode: str = None, holomorphic: bool = None, minSR_solver=lambda x : jnp.linalg.pinv(x), **kwargs):
+    def __init__(self, *args, mode: str = None, holomorphic: bool = None,
+                 solver=lambda A, b: jnp.linalg.lstsq(A, b, rcond=1.e-12)[0], diag_shift: float = 0., **kwargs):
         super().__init__(*args, **kwargs)
         assert(not (mode is not None and holomorphic is not None))
+        assert (diag_shift >= 0.) and (diag_shift <= 1.)
         if mode is None:
             self.mode = choose_jacobian_mode(self.state._apply_fun, self.state.parameters,
-                                             self.state.state, self.state.samples, mode=mode,
+                                             self.state.model_state, self.state.samples,
                                              holomorphic=holomorphic)
         else:
             self.mode = mode
-        self.solver = minSR_solver
+        self.solver = solver
+        self.diag_shift = diag_shift
 
     # Super simple implementation of the minSR driver
     def _forward_and_backward(self):
         self.state.reset()
 
-        if isinstance(self.state, MCStateUniqueSamples):
+        if hasattr(self.state, "samples_with_counts"):
             samples, counts = self.state.samples_with_counts
         else:
             samples = self.state.samples
@@ -49,7 +52,7 @@ class minSRVMC(VMC):
                             self.state.model_state, mode = self.mode, pdf = counts, dense=True, center=True)
 
 
-        self._loss_stats, self._loss_grad, dense_update = compute_update(loc_ens, O, counts, self.solver)
+        self._loss_stats, self._loss_grad, dense_update = compute_update(loc_ens, O, counts, self.solver, self.diag_shift)
 
         # Convert back to pytree
         unravel = lambda x : x
@@ -68,7 +71,7 @@ class minSRVMC(VMC):
 
 
 @partial(jax.jit, static_argnames=("solver"))
-def compute_update(loc_ens, O, counts, solver):
+def compute_update(loc_ens, O, counts, solver, diag_shift):
     mean = mpi.mpi_sum_jax(jnp.sum(loc_ens * counts))[0]
     var = mpi.mpi_sum_jax(jnp.sum(abs(loc_ens - mean)**2 * counts))[0]
 
@@ -86,9 +89,9 @@ def compute_update(loc_ens, O, counts, solver):
 
     loss_grad = jnp.dot(O.T, loc_ens_centered).real
 
-    OO = O.dot(O.conj().T)
+    OO = (1-diag_shift) * O.dot(O.conj().T) + diag_shift * jnp.eye(O.shape[0])
 
-    OO_epsilon = solver(OO).dot(loc_ens_centered)
+    OO_epsilon = solver(OO, loc_ens_centered)
 
     dense_update = O.conj().T.dot(OO_epsilon)
 

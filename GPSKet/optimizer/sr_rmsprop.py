@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from dataclasses import dataclass
@@ -5,7 +6,6 @@ from typing import Callable, Optional
 from netket.utils.types import PyTree, Scalar
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner
-from .solvers import pinv
 from .qgt import QGTJacobianDenseRMSProp
 
 
@@ -16,7 +16,7 @@ class SRRMSProp(AbstractLinearPreconditioner):
         self,
         params_structure: PyTree,
         qgt: Callable = QGTJacobianDenseRMSProp,
-        solver: Callable = pinv,
+        solver: Callable = jax.scipy.sparse.linalg.cg,
         *,
         diag_shift: Scalar = 0.01,
         decay: Scalar = 0.9,
@@ -49,8 +49,16 @@ class SRRMSProp(AbstractLinearPreconditioner):
 
     def __call__(self, vstate: VariationalState, gradient: PyTree, step: Optional[Scalar] = None) -> PyTree:
         # Update exponential moving average
+        def update_ema(nu, g):
+            if jnp.iscomplexobj(g):
+                # This assumes that the parameters are split into complex and real parts later on (done in the QGT implementation)
+                squared_g = (g.real**2 + 1.j * g.imag**2)
+            else:
+                squared_g = (g**2)
+            return self.decay*nu + (1-self.decay)* squared_g
+
         self._ema = tree_map(
-            lambda nu, g: self.decay*nu + (1-self.decay)*g**2,
+            update_ema,
             self._ema,
             gradient
         )

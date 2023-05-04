@@ -14,7 +14,8 @@ from netket.utils.mpi import (
     mpi_sum as _mpi_sum,
     n_nodes as _n_nodes,
     mpi_sum_jax as _mpi_sum_jax,
-    mpi_max_jax as _mpi_max_jax
+    mpi_max_jax as _mpi_max_jax,
+    mpi_allgather_jax as _mpi_allgather_jax
 )
 
 from netket.stats import Stats
@@ -43,6 +44,8 @@ class MCStateUniqueSamples(nk.vqs.MCState):
         self.max_sampling_steps = max_sampling_steps
         if batch_size is None:
             self.batch_size = self.n_samples
+        else:
+            self.batch_size = batch_size
 
     def reset(self):
         self._samples = None
@@ -68,30 +71,14 @@ class MCStateUniqueSamples(nk.vqs.MCState):
             samps = self.sample(n_samples = self.batch_size)
 
             while(continue_sampling):
-                # Make unique
-                local_batch, local_batch_count = np.unique(np.asarray(samps.reshape((-1, samps.shape[-1]))), return_counts=True, axis=0)
-
                 # Merge the samples from all mpi processes
-                all_samples = np.zeros((_mpi_sum(local_batch.shape[0]), local_batch.shape[-1]), dtype=local_batch.dtype)
-                all_counts = np.zeros(_mpi_sum(local_batch.shape[0]), dtype=int)
+                all_samples = _mpi_allgather_jax(samps)[0].reshape((-1, samps.shape[-1]))
 
-                # Get the local ids into the arrays to populate the full arrays above
-                counts = np.zeros(_n_nodes, dtype=int)
-                counts[_rank] = local_batch.shape[0]
-                counts = _mpi_sum(counts)
-
-                start_id = np.sum(counts[:_rank])
-                end_id = start_id + counts[_rank]
-                np.copyto(all_samples[start_id:end_id], local_batch)
-                np.copyto(all_counts[start_id:end_id], local_batch_count)
-
-                # Synchronize across ranks
-                all_samples = _mpi_sum(all_samples)
-                all_counts = _mpi_sum(all_counts)
-
-                # Add to the previously sampled configurations
-                for (i, samp) in enumerate(all_samples):
-                    unique_samps[tuple(samp)] += all_counts[i]
+                # Add to the previously sampled configurations, there is probably a much more efficient way of doing this but it's good enough for now
+                for samp in np.array(all_samples):
+                    unique_samps[tuple(samp)] += 1
+                    if len(unique_samps) >= self.n_samples:
+                        break
 
                 count += 1
 
@@ -104,7 +91,7 @@ class MCStateUniqueSamples(nk.vqs.MCState):
                     samps = self.sample(n_samples = self.batch_size, n_discard_per_chain=0)
 
 
-            unique_samples = np.tile(all_samples[0], (self.n_samples, 1))
+            unique_samples = np.tile(np.array(all_samples[0]), (self.n_samples, 1))
             relative_counts = np.zeros(self.n_samples, dtype=float)
 
             max_id = min(len(unique_samps), self.n_samples)

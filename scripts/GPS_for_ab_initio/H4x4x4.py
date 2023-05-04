@@ -153,12 +153,12 @@ phi = mf.mo_coeff[:, :mol.nelectron//2]
 
 _MPI_comm.Bcast(phi, root=0)
 
-def slater_init(key, shape, dtype=complex):
+def slater_init(key, shape, dtype=jnp.complex128):
     return jnp.array(phi).astype(dtype).reshape((1, norb, nelec//2))
 
 inner_SD = GPSKet.models.Slater(hi, init_fun=slater_init, dtype=jnp.complex128)
 
-qGPS_part = qGPS(hi, N, dtype=jnp.complex128, init_fun=normal(sigma=1.e-3, dtype=complex), apply_fast_update=True)
+qGPS_part = qGPS(hi, N, dtype=jnp.complex128, init_fun=normal(sigma=1.e-3, dtype=jnp.complex128), apply_fast_update=True)
 
 model = SlaterqGPS(inner_SD, qGPS_part)
 

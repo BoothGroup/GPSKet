@@ -11,10 +11,13 @@ from netket.optimizer.linear_operator import Uninitialized
 from netket.optimizer.qgt.common import check_valid_vector_type
 from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
 
+from GPSKet.vqs import MCStateUniqueSamples
+
+from functools import partial
 
 def QGTJacobianDenseRMSProp(
-    vstate,
-    ema,
+    vstate=None,
+    ema=None,
     mode: str = None,
     holomorphic: bool = None,
     diag_shift=None,
@@ -25,6 +28,11 @@ def QGTJacobianDenseRMSProp(
     if mode is not None and holomorphic is not None:
         raise ValueError("Cannot specify both `mode` and `holomorphic`.")
 
+    if vstate is None:
+        return partial(QGTJacobianDenseRMSProp, mode=mode, holomorphic=holomorphic,
+                       diag_shift=diag_shift, eps=eps, chunk_size=chunk_size, **kwargs)
+
+
     assert diag_shift >= 0.0 and diag_shift <= 1.0
 
     # TODO: Find a better way to handle this case
@@ -33,6 +41,8 @@ def QGTJacobianDenseRMSProp(
     if isinstance(vstate, ExactState):
         samples = split_array_mpi(vstate._all_states)
         pdf = split_array_mpi(vstate.probability_distribution())
+    elif isinstance(vstate, MCStateUniqueSamples):
+        samples, pdf = vstate.samples_with_counts
     else:
         samples = vstate.samples
         pdf = None
@@ -46,6 +56,9 @@ def QGTJacobianDenseRMSProp(
             mode=mode,
             holomorphic=holomorphic,
         )
+
+    if mode == "holomorphic":
+        raise ValueError("Mode cannot be holomorphic for the QGT with RMSProp diagonal shift")
 
     if chunk_size is None and hasattr(vstate, "chunk_size"):
         chunk_size = vstate.chunk_size
@@ -94,7 +107,7 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
             vec, self.mode, disable=self._in_solve
         )
 
-        ema, _ = nkjax.tree_ravel(self.ema)
+        ema, _ = convert_tree_to_dense_format(self.ema, self.mode)
         result = mat_vec(vec, self.O, self.diag_shift, ema, self.eps)
 
         return reassemble(result)
@@ -130,7 +143,7 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
         S = mpi.mpi_sum_jax(O.conj().T @ O)[0]
 
         # Compute diagonal shift and apply it to S matrix
-        ema, _ = nkjax.tree_ravel(self.ema)
+        ema, _ = convert_tree_to_dense_format(self.ema, self.mode)
         diag = jnp.diag(jnp.sqrt(ema) + self.eps)
         return (1-self.diag_shift)*S + self.diag_shift * diag
 
@@ -138,7 +151,7 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
         return (
             f"QGTJacobianDenseRMSProp(diag_shift={self.diag_shift}, mode={self.mode})"
         )
-    
+
 ########################################################################################
 #####                                  QGT Logic                                   #####
 ########################################################################################

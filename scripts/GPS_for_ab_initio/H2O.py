@@ -63,7 +63,7 @@ if _rank == 0:
     else:
         loc_coeff = myhf.mo_coeff
         if basis_type != 1:
-            loc_coeff = lo.orth_ao(mol, 'meta_lowdin')
+            loc_coeff = lo.orth_ao(mol, 'meta_lowdin') # Using "lowdin" might improve the starting guess for a subsequent Boys localization
             if basis_type == 0:
                 localizer = lo.Boys(mol, loc_coeff)
                 localizer.verbose = 4
@@ -176,23 +176,23 @@ phi = mf.mo_coeff[:, :mol.nelectron//2]
 
 _MPI_comm.Bcast(phi, root=0)
 
-def pfaffian_init(key, shape, dtype=complex):
+def pfaffian_init(key, shape, dtype=jnp.complex128):
     out = jnp.array(np.einsum("in,jn->ij", phi, phi)).astype(dtype)
     # out += jax.nn.initializers.normal(dtype=out.dtype)(key, shape=out.shape, dtype=dtype)
     return out
 
-def slater_init(key, shape, dtype=complex):
+def slater_init(key, shape, dtype=jnp.complex128):
     out = jnp.array(phi).astype(dtype).reshape((1, norb, nelec//2))
     # out += jax.nn.initializers.normal(dtype=out.dtype)(key, shape=out.shape, dtype=dtype)
     return out
 
-def full_slater_init(key, shape, dtype=complex):
+def full_slater_init(key, shape, dtype=jnp.complex128):
     out = jnp.block([[jnp.array(phi).astype(dtype), jnp.zeros(phi.shape, dtype=dtype)],
                      [jnp.zeros(phi.shape, dtype=dtype), jnp.array(phi).astype(dtype)]])
     # out += jax.nn.initializers.normal(dtype=out.dtype)(key, shape=out.shape, dtype=dtype)
     return out.reshape((1, 2*norb, nelec))
 
-qGPS_part = qGPS(hi, M, dtype=jnp.complex128, init_fun=normal(sigma=1.e-1, dtype=complex), apply_fast_update=True)
+qGPS_part = qGPS(hi, M, dtype=jnp.complex128, init_fun=normal(sigma=1.e-1, dtype=jnp.complex128), apply_fast_update=True)
 
 # 0: no ref_state, 1: SD, 2: Spin projected SD, 3: Pfaffian, 4: Spin projected Pfaffian, 5: magnetization breaking SD
 if ref_state == 1:

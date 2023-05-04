@@ -23,12 +23,11 @@ from dataclasses import replace
 
 """ Implements a state with stratified sampling, splitting the evaluation of expectation values
 into a determinisitic evaluation over a fixed set, and a sampled estimate over the complement.
-At the moment this is only an implementation for quick testing which is very slow. """
+At the moment this is only an implementation for quick testing which is very slow.
+The number of samples passed is the number of samples taken in addition to the deterministic set."""
 class MCStateStratifiedSampling(MCStateUniqueSamples):
     def __init__(self, deterministic_samples, N_total, *args, rand_norm=True, number_random_samples=None, renormalize=True, **kwargs):
         super().__init__(*args, **kwargs)
-
-        assert(self.sampler.n_chains_per_rank == 1)
 
         self.n_sweeps = self.sampler.n_sweeps
 
@@ -42,19 +41,26 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
 
         self.lookup_dict = {tuple(conf): i for i, conf in enumerate(np.array(deterministic_samples))}
 
-        # Find a valid initial sample (one from the complement)
+        # Find a valid initial sample (one from the complement), very inelegant
         key = jax.random.split(self.sampler_state.rng)[0]
-        self.current_sample = self.sampler.hilbert.random_state(key, dtype=self.deterministic_samples.dtype).reshape(-1)
-        while(tuple(np.array(self.current_sample)) in self.lookup_dict):
+
+        self.current_sample = []
+
+        for j in range(self.sampler.n_chains_per_rank):
+            samp = self.sampler.hilbert.random_state(key, dtype=self.deterministic_samples.dtype).reshape(-1)
+            while(tuple(np.array(samp)) in self.lookup_dict):
+                key = jax.random.split(key)[0]
+                samp = self.sampler.hilbert.random_state(key, dtype=self.deterministic_samples.dtype).reshape(-1)
+            self.current_sample.append(samp)
             key = jax.random.split(key)[0]
-            self.current_sample = self.sampler.hilbert.random_state(key, dtype=self.deterministic_samples.dtype).reshape(-1)
-        self.sampler_state = replace(self.sampler_state, σ = self.current_sample.reshape((1,-1)))
+        self.current_sample = jnp.array(np.array(self.current_sample))
+        self.sampler_state = replace(self.sampler_state, σ = self.current_sample)
 
         if not self.rand_norm:
             assert(number_random_samples is None)
 
         if number_random_samples is None:
-            self.number_random_samples = self.n_samples_per_rank - self.deterministic_samples.shape[0]
+            self.number_random_samples = self.n_samples_per_rank
         else:
             self.number_random_samples = len(np.array_split(np.arange(number_random_samples), _n_nodes)[_rank])
 
@@ -63,13 +69,17 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
 
     def sample_step(self):
         old_sample = self.current_sample
-        self.current_sample = self.sample(chain_length=1, n_discard_per_chain=0).reshape(-1)
+        self.current_sample = self.sample(chain_length=1, n_discard_per_chain=0).reshape(self.current_sample.shape)
 
-        # Reject the sample if it is in the determinisitc set
-        if tuple(np.array(self.current_sample).reshape(-1)) in self.lookup_dict:
-            self.current_sample = old_sample
+        # Reject the samples in the deterministic set, this is quite hacky (and slow!)
+        valid = np.ones(self.current_sample.shape[0], dtype=bool)
+        for i, samp in enumerate(self.current_sample):
+            if tuple(np.array(samp)) in self.lookup_dict:
+                valid[i] = False
 
-        self.sampler_state = replace(self.sampler_state, σ = self.current_sample.reshape((1,-1)))
+        self.current_sample = jnp.where(np.expand_dims(valid,-1), self.current_sample, old_sample)
+
+        self.sampler_state = replace(self.sampler_state, σ = self.current_sample)
 
 
     @property
@@ -81,14 +91,13 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
                     self.sample_step()
 
             # Sample from the complement
-            remaining_samples = self.n_samples_per_rank - self.deterministic_samples.shape[0]
             sampled_configs = []
-            for i in range(remaining_samples):
+            for i in range(self.chain_length):
                 for j in range(self.n_sweeps):
                     self.sample_step()
                 sampled_configs.append(self.current_sample)
 
-            samples_from_complement = jnp.array(np.array(sampled_configs))
+            samples_from_complement = jnp.array(np.array(sampled_configs)).reshape((-1, self.current_sample.shape[-1]))
 
             all_samples = jnp.concatenate((self.deterministic_samples, samples_from_complement))
 
@@ -98,13 +107,15 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
             log_prob_amps_deterministic =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(self.deterministic_samples)
             log_prob_amps_complement =  nkjax.vmap_chunked(log_prob, chunk_size=self.chunk_size)(samples_from_complement)
 
-            if self.renormalize:
+            total_samples = _sum(len(log_prob_amps_complement))
+            if self.renormalize: # Switch off for normalized models (e.g. autoregressive models)
                 # Renormalise the probability amplitudes for numerical stability
                 rescale_shift = _mpi_max_jax(jnp.max(jnp.concatenate((log_prob_amps_deterministic, log_prob_amps_complement))))[0]
                 log_prob_amps_deterministic -= rescale_shift
                 log_prob_amps_complement -= rescale_shift
                 # Contribution of the determinisitc set to the norm
                 norm_deterministic = _sum(jnp.exp(log_prob_amps_deterministic))
+
 
                 if self.rand_norm:
                     # Approximation to the norm correction from a uniformly sampled set
@@ -129,7 +140,7 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
 
                 else:
                     # Approximation to the norm correction from the sampled set (evaluated with self-normalizing importance sampling)
-                    norm_sampled = self.N_complement * _sum(jnp.exp(2 * log_prob_amps_complement))/_sum(jnp.exp(log_prob_amps_complement))
+                    norm_sampled = self.N_complement * total_samples /_sum(jnp.exp(-log_prob_amps_complement))
 
                 norm_estimate = norm_deterministic + norm_sampled
             else:
@@ -137,7 +148,7 @@ class MCStateStratifiedSampling(MCStateUniqueSamples):
                 norm_estimate = 1.
 
             prefactors_det = jnp.exp(log_prob_amps_deterministic)/norm_estimate
-            prefactors_sampled = jnp.ones(log_prob_amps_complement.shape) * (1 - norm_deterministic/norm_estimate) / _sum(len(log_prob_amps_complement))
+            prefactors_sampled = jnp.ones(log_prob_amps_complement.shape) * (1 - norm_deterministic/norm_estimate) / total_samples
 
             self._unique_samples = all_samples
             self._relative_counts = jnp.concatenate((prefactors_det, prefactors_sampled))
