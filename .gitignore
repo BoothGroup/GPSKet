@@ -1,2 +1,6 @@
 *.pyc
 GPSKet.egg-info
+
+# Developer files #
+###################
+.envrc
