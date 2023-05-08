@@ -1,5 +1,5 @@
 # Scripts for AutoRegressive GPS (ARGPS)
-This folder contains the code to generate the data presented in our upcoming manuscript *Expressivity of autoregressive quantum states* by Massimo Bortone, Yannic Rath and George H. Booth.
+This folder contains the code to generate the data presented in our upcoming manuscript *"Expressivity of Autoregressive Gaussian Process States"* by Massimo Bortone, Yannic Rath and George H. Booth.
 
 ## Organization
 The code is structured as follows:
