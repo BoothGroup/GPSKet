@@ -9,7 +9,6 @@ from netket.utils.types import PyTree, Scalar
 from netket.optimizer import LinearOperator
 from netket.optimizer.linear_operator import Uninitialized
 from netket.optimizer.qgt.common import check_valid_vector_type
-from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
 
 from GPSKet.vqs import MCStateUniqueSamples
 
@@ -48,7 +47,7 @@ def QGTJacobianDenseRMSProp(
         pdf = None
 
     if mode is None:
-        mode = choose_jacobian_mode(
+        mode = nkjax.jacobian_default_mode(
             vstate._apply_fun,
             vstate.parameters,
             vstate.model_state,
