@@ -1,5 +1,5 @@
 import netket as nk
-from netket.optimizer.qgt.qgt_jacobian_common import (choose_jacobian_mode, sanitize_diag_shift, to_shift_offset, rescale)
+from netket.optimizer.qgt.qgt_jacobian_common import (sanitize_diag_shift, to_shift_offset, rescale)
 from netket.optimizer.qgt.qgt_jacobian_dense import QGTJacobianDenseT
 
 import netket.jax as nkjax
@@ -30,7 +30,7 @@ def QGTJacobianDenseUniqueSamples(vstate=None, *, mode: str = None, holomorphic:
         return partial(QGTJacobianDenseUniqueSamples, mode=mode, holomorphic=holomorphic)
 
     if mode is None:
-        mode = choose_jacobian_mode(vstate._apply_fun, vstate.parameters, vstate.model_state, vstate.samples[0], holomorphic=holomorphic)
+        mode = nkjax.jacobian_default_mode(vstate._apply_fun, vstate.parameters, vstate.model_state, vstate.samples[0], holomorphic=holomorphic)
     else:
         assert(holomorphic is None)
 

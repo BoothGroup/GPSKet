@@ -12,8 +12,6 @@ from netket.utils import mpi
 
 from GPSKet.vqs import MCStateUniqueSamples
 
-from netket.optimizer.qgt.qgt_jacobian_common import choose_jacobian_mode
-
 class minSRVMC(VMC):
     """
     VMC driver utilizing the minSR updates as proposed in https://arxiv.org/abs/2302.01941
@@ -24,7 +22,7 @@ class minSRVMC(VMC):
         assert(not (mode is not None and holomorphic is not None))
         assert (diag_shift >= 0.) and (diag_shift <= 1.)
         if mode is None:
-            self.mode = choose_jacobian_mode(self.state._apply_fun, self.state.parameters,
+            self.mode = nk.jax.jacobian_default_mode(self.state._apply_fun, self.state.parameters,
                                              self.state.model_state, self.state.samples,
                                              holomorphic=holomorphic)
         else:
