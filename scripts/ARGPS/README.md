@@ -12,7 +12,7 @@ The code is structured as follows:
 The configuration files are:
 - [heisenberg2d.py](argps/configs/heisenberg2d.py): configurations for VMC on a 2D Heisenberg system; accepts a valid model name as option (`GPS`, `ARGPS`, `MaskedGPS`, `ARFilterGPS`, `MaskedFilterGPS`)
 - [hubbard1d.py](argps/configs/hubbard1d.py): configurations for VMC on a 1D Hubbard system in second quantization with `ARFilterGPS`
-- [hydrogen.py](argps/configs/hydrogen.py): configurations for VMC on an ab-initio Hamiltonian in second quantization for molecular hydrogen; accepts different geometries as option (`chain` or `sheet`)
+- [hydrogen.py](argps/configs/hydrogen.py): configurations for VMC on an ab-initio Hamiltonian in second quantization for molecular hydrogen; accepts geometry (`chain` or `sheet`), basis (`canonical` or `local`) and dtype (`real` or `complex`) as options.
 
 ## Requirements
 To run the code make sure the following packages are installed:
@@ -21,9 +21,9 @@ To run the code make sure the following packages are installed:
 - [ml_collections](https://github.com/google/ml_collections): configuration file data structures
 
 ## Example
-To start a VMC optimization on the Heisenberg lattice with the `ARGPS` model for 100 steps, for example, run the following command from the `scripts` folder:
+To start a VMC optimization on the Heisenberg lattice with the `ARGPS` model for 100 steps, for example, run the following command from the `scripts/ARGPS` folder:
 ```
-python -m argps.vmc --workdir=/path/to/run --config=ARGPS/argps/configs/heisenberg2d.py:ARGPS --config.max_steps=100
+python -m argps.vmc --workdir=/path/to/run --config=./argps/configs/heisenberg2d.py:ARGPS --config.max_steps=100
 ```
 This will load the configuration file `argps/configs/heisenberg2d.py`, set the model to `ARGPS` and override the default setting of the `max_steps` parameter.
 Any other parameter in the config can be overidden like this.

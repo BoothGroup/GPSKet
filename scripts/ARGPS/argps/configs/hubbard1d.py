@@ -1,5 +1,5 @@
 from ml_collections.config_dict import placeholder
-from configs.common import get_config as get_base_config
+from argps.configs.common import get_config as get_base_config
 
 
 def get_config():

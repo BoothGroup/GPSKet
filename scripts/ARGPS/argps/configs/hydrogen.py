@@ -1,6 +1,6 @@
 import math
 from ml_collections.config_dict import placeholder
-from configs.common import get_config as get_base_config
+from argps.configs.common import get_config as get_base_config
 
 
 def closest_divisors(n):
@@ -22,9 +22,14 @@ def sheet(config):
     config.system.molecule = molecule
     return config
 
-def get_config(geometry):
+def get_config(options):
+    geometry, basis, dtype = options.split(',')
     if geometry not in ['chain', 'sheet']:
         raise ValueError(f"{geometry} is not a valid config option: choose between `chain` and `sheet`.")
+    if basis not in ['canonical', 'local']:
+        raise ValueError(f"{basis} is not a valid config option: choose between `canonical` and `local`.")
+    if dtype not in ['real', 'complex']:
+        raise ValueError(f"{dtype} is not a valid config option: choose between `real` and `complex`.")
 
     config = get_base_config()
 
@@ -33,7 +38,7 @@ def get_config(geometry):
     config.system.n_atoms = 16
     config.system.distance = 1.8
     config.system.basis_set = 'sto-6g'
-    config.system.basis = 'canonical'
+    config.system.basis = basis
     config.system.symmetry = True
     config.system.unit = 'Bohr'
     config.system.molecule = placeholder(list)
@@ -45,14 +50,14 @@ def get_config(geometry):
 
     # Model
     config.model_name = 'ARGPS'
-    config.model.M = '64' # To allow int as well as tuples, set support dimension as string first and parse it later
-    config.model.dtype = 'real'
+    config.model.M = '16' # To allow int as well as tuples, set support dimension as string first and parse it later
+    config.model.dtype = dtype
     config.model.sigma = 0.1
     config.model.symmetries = 'none'
     config.model.apply_exp = True
 
     # Variational state
-    config.variational_state.n_samples = 4096
+    config.variational_state.n_samples = 5000
     config.variational_state.chunk_size = placeholder(int)
     config.variational_state.seed = placeholder(int)
 
@@ -60,8 +65,8 @@ def get_config(geometry):
     config.sampler_name = 'ARDirectSampler'
 
     # Optimizer
-    config.optimizer.learning_rate = 0.01
-    config.optimizer.mode = 'real'
+    config.optimizer.learning_rate = 0.04
+    config.optimizer.mode = dtype
     config.optimizer.diag_shift = 0.01
     config.optimizer.decay = 0.9
     config.optimizer.eps = 1e-8
