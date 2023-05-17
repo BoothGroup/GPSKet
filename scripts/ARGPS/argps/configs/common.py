@@ -1,3 +1,8 @@
+import numpy as np
+from netket.utils.mpi import (
+    MPI_py_comm as MPI_comm,
+    node_number as MPI_rank
+)
 from ml_collections import ConfigDict
 
 
@@ -28,6 +33,15 @@ def get_config() -> ConfigDict:
     return config
 
 def resolve(config: ConfigDict) -> ConfigDict:
+    # Set random seed
+    if MPI_rank == 0:
+        seed = np.random.randint(np.iinfo(np.uint32).max)
+    else:
+        seed = None
+    seed = MPI_comm.bcast(seed, root=0)
+    if config.variational_state_name != 'ExactState' and config.variational_state.get('seed', None) is None:
+        config.variational_state.seed = seed
+
     # Resolve molecular configuration
     if 'set_molecule' in config.system and callable(config.system.set_molecule):
         config = config.system.set_molecule(config)

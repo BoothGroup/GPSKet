@@ -1,8 +1,6 @@
 import os
 import yaml
 import csv
-from typing import NamedTuple
-from netket.utils.types import PyTree, Any
 from timeit import default_timer as timer
 from datetime import timedelta, time
 
@@ -39,11 +37,6 @@ class CSVLogger:
         with open(self.filename, mode='a') as f:
             writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             writer.writerow({'Step': step, **metrics})
-
-class VMCState(NamedTuple):
-    parameters: PyTree
-    opt_state: Any
-    step: int
 
 class Timer:
     """
