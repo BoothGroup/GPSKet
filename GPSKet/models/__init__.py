@@ -19,3 +19,5 @@ from .slater_jastrow import SlaterJastrow
 from .backflow import Backflow
 
 from .backflow_jastrow import BackflowJastrow
+
+from .pixelcnn import PixelCNN
