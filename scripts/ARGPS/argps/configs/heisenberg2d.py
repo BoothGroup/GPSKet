@@ -39,7 +39,7 @@ def get_config(model):
         config.sampler_name = 'ARDirectSampler'
     else:
         config.sampler_name = 'MetropolisExchange'
-        config.sampler.n_chains = config.variational_state.get_ref('n_samples')
+        config.sampler.n_chains_per_rank = 1
         config.sampler.n_sweeps = config.system.get_ref('Lx')
         config.sampler.d_max = config.system.get_ref('Lx')//2
 

@@ -16,6 +16,7 @@ from typing import Union, Tuple, Callable, Optional
 
 _MODELS = {
     'GPS': qk.models.qGPS,
+    'FilterGPS': qk.models.qGPS,
     'ARGPS': qk.models.ARqGPSFull,
     'MaskedGPS': qk.models.ARqGPSFull,
     'ARFilterGPS': qk.models.ARPlaquetteqGPS,
@@ -58,7 +59,7 @@ def get_model(config : ConfigDict, hilbert : HomogeneousHilbert, graph : Optiona
     else:
         symmetries_fn, inv_symmetries_fn = qk.models.no_syms()
     out_trafo = get_out_transformation(name, config.model.apply_exp)
-    if name != 'GPS':
+    if name != 'GPS' and name != 'FilterGPS':
         if isinstance(hilbert, nk.hilbert.Spin):
             count_spins_fn = count_spins
             renormalize_log_psi_fn = renormalize_log_psi
@@ -82,7 +83,14 @@ def get_model(config : ConfigDict, hilbert : HomogeneousHilbert, graph : Optiona
                 renormalize_log_psi=renormalize_log_psi_fn,
                 out_transformation=out_trafo)
     else:
-        args = [hilbert, hilbert.size*M]
+        if 'Filter' in name:
+            # TODO: add support for projective symmetrization of point-group and spin-flip symmetries
+            args = [hilbert, M]
+            if config.system_name == 'Hubbard1d':
+                graph = nk.graph.Chain(config.system.Lx, pbc=config.system.pbc)
+            symmetries_fn, inv_symmetries_fn = get_symmetry_transformation_spin(name, True, False, False, graph)
+        else:
+            args = [hilbert, hilbert.size*M]
         ma = ma_cls(
             *args,
             dtype=dtype,
@@ -119,7 +127,7 @@ def get_symmetry_transformation_spin(name : str, translations : bool, point_symm
                 inv_syms[syms[i,j], j] = i
         syms = jnp.array(syms)
         inv_syms = jnp.array(inv_syms)
-    if name == 'GPS':
+    if name == 'GPS' or name == 'FilterGPS':
         inv_centre = 1
     else:
         inv_centre = 0
@@ -280,7 +288,7 @@ def get_out_transformation(name: str, apply_exp: bool):
     Returns:
         a callable function that is applied in the output layer of a GPS model
     """
-    if name == 'GPS':
+    if name == 'GPS' or name == 'FilterGPS':
         axis = (-2,-1)
     else:
         axis = -1
