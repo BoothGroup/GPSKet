@@ -9,6 +9,8 @@ import netket as nk
 from netket import VMC
 from netket.stats import Stats
 from netket.utils import mpi
+from netket.stats._autocorr import integrated_time
+from netket.stats.mc_stats import _split_R_hat
 
 from GPSKet.vqs import MCStateUniqueSamples
 
@@ -49,7 +51,6 @@ class minSRVMC(VMC):
         O = nk.jax.jacobian(self.state._apply_fun, self.state.parameters, samples,
                             self.state.model_state, mode = self.mode, pdf = counts, dense=True, center=True)
 
-
         self._loss_stats, self._loss_grad, dense_update = compute_update(loc_ens, O, counts, self.solver, self.diag_shift)
 
         # Convert back to pytree
@@ -70,10 +71,7 @@ class minSRVMC(VMC):
 
 @partial(jax.jit, static_argnames=("solver"))
 def compute_update(loc_ens, O, counts, solver, diag_shift):
-    mean = mpi.mpi_sum_jax(jnp.sum(loc_ens * counts))[0]
-    var = mpi.mpi_sum_jax(jnp.sum(abs(loc_ens - mean)**2 * counts))[0]
-
-    loss_stats = Stats(mean, np.nan, var, np.nan, np.nan)
+    loss_stats = _statistics(loc_ens, counts)
 
     loc_ens_centered = (loc_ens - loss_stats.mean) * jnp.sqrt(counts)
 
@@ -95,5 +93,26 @@ def compute_update(loc_ens, O, counts, solver, diag_shift):
 
     return loss_stats, loss_grad, dense_update
 
+@jax.jit
+def _statistics(data, counts):
+    data = jnp.atleast_1d(data)
+    if data.ndim == 1:
+        data = data.reshape((1, -1))
 
+    if data.ndim > 2:
+        raise NotImplementedError("Statistics are implemented only for ndim<=2")
 
+    batch_size = mpi.mpi_sum_jax(data.shape[0])[0]
+
+    mean = mpi.mpi_sum_jax(jnp.sum(data * counts))[0]
+    var = mpi.mpi_sum_jax(jnp.sum(abs(data - mean)**2 * counts))[0]
+    error_of_mean = jnp.sqrt(var / batch_size)
+    
+    taus = jax.vmap(integrated_time)(data)
+    tau_avg, _ = mpi.mpi_mean_jax(jnp.mean(taus))
+    
+    R_hat = _split_R_hat(data, var)
+    
+    res = Stats(mean, error_of_mean, var, tau_avg, R_hat)
+    
+    return res
