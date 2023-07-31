@@ -39,7 +39,7 @@ def resolve(config: ConfigDict) -> ConfigDict:
     else:
         seed = None
     seed = MPI_comm.bcast(seed, root=0)
-    if config.variational_state_name != 'ExactState' and config.variational_state.get('seed', None) is None:
+    if config.variational_state_name != 'FullSumState' and config.variational_state.get('seed', None) is None:
         config.variational_state.seed = seed
 
     # Resolve molecular configuration

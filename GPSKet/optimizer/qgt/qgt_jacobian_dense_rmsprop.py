@@ -35,9 +35,9 @@ def QGTJacobianDenseRMSProp(
     assert diag_shift >= 0.0 and diag_shift <= 1.0
 
     # TODO: Find a better way to handle this case
-    from netket.vqs import ExactState
+    from netket.vqs import FullSumState
 
-    if isinstance(vstate, ExactState):
+    if isinstance(vstate, FullSumState):
         samples = split_array_mpi(vstate._all_states)
         pdf = split_array_mpi(vstate.probability_distribution())
     elif isinstance(vstate, MCStateUniqueSamples):
@@ -62,6 +62,10 @@ def QGTJacobianDenseRMSProp(
     if chunk_size is None and hasattr(vstate, "chunk_size"):
         chunk_size = vstate.chunk_size
 
+    # real/holomorphic: (n_samples, n_params), complex: (n_samples, 2, n_params)
+    # NOTE: will run OOM on a single NVIDIA A100 80GB GPU when:
+    # - n_samples*n_params ~ 10^10 for real parameters or
+    # - n_samples*n_params ~ 10^9 for complex ones
     jacobians = nkjax.jacobian(
         vstate._apply_fun,
         vstate.parameters,

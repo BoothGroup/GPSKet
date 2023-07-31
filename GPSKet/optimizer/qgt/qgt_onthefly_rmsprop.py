@@ -57,10 +57,10 @@ def QGTOnTheFlyRMSProp(
     assert diag_shift >= 0.0 and diag_shift <= 1.0
 
     # TODO: Find a better way to handle this case
-    from netket.vqs import ExactState
+    from netket.vqs import FullSumState
 
-    if isinstance(vstate, ExactState):
-        raise TypeError("ExactState is not supported. Use QGTJacobianDenseRMSProp instead.")
+    if isinstance(vstate, FullSumState):
+        raise TypeError("FullSumState is not supported. Use QGTJacobianDenseRMSProp instead.")
 
     from GPSKet.vqs import MCStateUniqueSamples
     if isinstance(vstate, MCStateUniqueSamples):
