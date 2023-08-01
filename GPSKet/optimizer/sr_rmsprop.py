@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_map
 from dataclasses import dataclass
 from typing import Callable, Optional
-from netket.utils.types import PyTree, Scalar
+from netket.utils.types import PyTree, ScalarOrCallable
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner
 from .qgt import QGTJacobianDenseRMSProp
@@ -18,7 +18,7 @@ class SRRMSProp(AbstractLinearPreconditioner):
         qgt: Callable = QGTJacobianDenseRMSProp,
         solver: Callable = jax.scipy.sparse.linalg.cg,
         *,
-        diag_shift: Scalar = 0.01,
+        diag_shift: ScalarOrCallable = 0.01,
         decay: Scalar = 0.9,
         eps: Scalar = 1e-8,
         initial_scale: Scalar = 0.0,
@@ -39,10 +39,18 @@ class SRRMSProp(AbstractLinearPreconditioner):
         del params_structure
 
     def lhs_constructor(self, vstate: VariationalState, ema: PyTree, step: Optional[Scalar] = None):
+        diag_shift = self.diag_shift
+        if callable(self.diag_shift):
+            if step is None:
+                raise TypeError(
+                    "If you use a scheduled `diag_shift`, you must call "
+                    "the precoditioner with an extra argument `step`."
+                )
+            diag_shift = diag_shift(step)
         return self.qgt_constructor(
             vstate,
             ema,
-            diag_shift=self.diag_shift,
+            diag_shift=diag_shift,
             eps=self.eps,
             **self.qgt_kwargs
         )
