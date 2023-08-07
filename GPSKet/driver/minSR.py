@@ -50,20 +50,10 @@ class minSRVMC(VMC):
         samples = samples.reshape((-1, samples.shape[-1]))
         counts = counts.reshape((-1,))
 
-        # Gather samples and counts
-        if hasattr(self.state, "samples_with_counts"):
-            samples, counts = self.state.samples_with_counts
-        else:
-            samples = self.state.samples
-            counts = jnp.ones(samples.shape[:-1])/(mpi.mpi_sum_jax(np.prod(samples.shape[:-1]))[0])
-        samples = samples.reshape((-1, samples.shape[-1]))
-        counts = counts.reshape((-1,))
-
         # Compute local energies and center them
         loc_ens = self.state.local_estimators(self._ham).T.reshape(-1)
         self._loss_stats = _statistics(loc_ens, counts)
         loc_ens_centered = (loc_ens-self._loss_stats.mean)*jnp.sqrt(counts)
-        loc_ens_centered = (mpi.mpi_allgather_jax(loc_ens_centered)[0]).reshape(-1)
 
         # Prepare chunks
         n_samples_per_rank = samples.shape[0]
@@ -75,12 +65,13 @@ class minSRVMC(VMC):
 
         # Initialize neural tangent kernel, gradient of loss and dense update
         dtype = jnp.complex128 if self.mode == "holomorphic" else jnp.float64
-        O_avg = jnp.zeros(self.state.n_parameters, dtype=dtype)
         if self.mode == "holomorphic" or self.mode == "real":
+            O_avg = jnp.zeros(self.state.n_parameters, dtype=dtype)
             OO = jnp.zeros((self.state.n_samples, self.state.n_samples), dtype=dtype)
             loss_grad = jnp.zeros(self.state.n_parameters, dtype=dtype)
             dense_update = jnp.zeros(self.state.n_parameters, dtype=jnp.complex128)
         else:
+            O_avg = jnp.zeros(2*self.state.n_parameters, dtype=dtype)
             OO = jnp.zeros((2*self.state.n_samples, 2*self.state.n_samples), dtype=dtype)
             loss_grad = jnp.zeros(2*self.state.n_parameters, dtype=dtype)
             dense_update = jnp.zeros(2*self.state.n_parameters, dtype=jnp.complex128)
@@ -90,12 +81,18 @@ class minSRVMC(VMC):
             counts_i = counts[i]
             O_i = nk.jax.jacobian(self.state._apply_fun, self.state.parameters, samples[i],
                                   self.state.model_state, mode=self.mode, pdf=counts_i, dense=True, center=False)
-            loss_grad += jnp.dot(O_i.T, loc_ens_centered[i]).real
+            O_i = (mpi.mpi_allgather_jax(O_i)[0]).reshape((-1, *O_i.shape[1:]))
+            if len(O_i.shape) == 3:
+                O_i = O_i[:,0,:] + 1.j * O_i[:,1,:]
+            counts_i = (mpi.mpi_allgather_jax(counts_i)[0]).reshape((-1,))
+            loc_ens_centered_i = (mpi.mpi_allgather_jax(loc_ens_centered[i])[0]).reshape((-1,))
+            loss_grad += jnp.dot(O_i.T, loc_ens_centered_i).real
             O_avg += np.sum(O_i*counts_i[:, np.newaxis], axis=0)
         
         # Compute neural tangent kernel
+        mpi_rank = jnp.repeat(jnp.arange(mpi.n_nodes), self.state.chunk_size)
         for i in range(n_chunks):
-            idx_i = idx[i]
+            idx_i = (mpi.mpi_allgather_jax(idx[i])[0]).reshape((-1,))+mpi_rank
             O_i = nk.jax.jacobian(self.state._apply_fun, self.state.parameters, samples[i],
                                   self.state.model_state, mode=self.mode, pdf=counts[i], dense=True, center=False)
             O_i = (mpi.mpi_allgather_jax(O_i)[0]).reshape((-1, *O_i.shape[1:]))
@@ -103,26 +100,29 @@ class minSRVMC(VMC):
                 O_i = O_i[:,0,:] + 1.j * O_i[:,1,:]
             O_i = O_i-O_avg
             for j in range(n_chunks):
+                idx_j = (mpi.mpi_allgather_jax(idx[j])[0]).reshape((-1,))+mpi_rank
                 O_j = nk.jax.jacobian(self.state._apply_fun, self.state.parameters, samples[j],
                                       self.state.model_state, mode=self.mode, pdf=counts[j], dense=True, center=False)
                 O_j = (mpi.mpi_allgather_jax(O_j)[0]).reshape((-1, *O_j.shape[1:]))
                 if len(O_j.shape) == 3:
                     O_j = O_j[:,0,:] + 1.j * O_j[:,1,:]
                 O_j = O_j-O_avg
-                ii, jj = np.meshgrid(idx_i, idx[j], indexing="ij")
+                ii, jj = np.meshgrid(idx_i, idx_j, indexing="ij")
                 OO = OO.at[ii, jj].set(O_i.dot(O_j.conj().T))
 
         # Solve linear system and compute parameters update
-        loc_ens_centered = jnp.reshape(loc_ens_centered, (n_chunks*self.state.chunk_size,))
+        # FIXME: shapes don't match for complex models and complex mode
+        loc_ens_centered = (mpi.mpi_allgather_jax(loc_ens_centered)[0]).reshape((-1,))
         OO_epsilon = self.solver(OO, loc_ens_centered)
         for i in range(n_chunks):
+            idx_i = (mpi.mpi_allgather_jax(idx[i])[0]).reshape((-1,))+mpi_rank
             O_i = nk.jax.jacobian(self.state._apply_fun, self.state.parameters, samples[i],
                                   self.state.model_state, mode=self.mode, pdf=counts[i], dense=True, center=False)
             O_i = (mpi.mpi_allgather_jax(O_i)[0]).reshape((-1, *O_i.shape[1:]))
             if len(O_i.shape) == 3:
                 O_i = O_i[:,0,:] + 1.j * O_i[:,1,:]
             O_i = O_i-O_avg
-            dense_update += O_i.conj().T.dot(OO_epsilon[idx[i]])               
+            dense_update += O_i.conj().T.dot(OO_epsilon[idx_i])               
 
         # Convert back to pytree
         unravel = lambda x : x
