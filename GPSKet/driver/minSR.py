@@ -164,7 +164,6 @@ class minSRVMC(VMC):
                 OO = OO.at[ii, jj].set(O_i.dot(O_j.conj().T))
 
         # Solve linear system and compute parameters update
-        # FIXME: shapes don't match for complex models and complex mode
         loc_ens_centered_restacked = jnp.swapaxes(
             mpi.mpi_allgather_jax(loc_ens_centered)[0], 0, 1
         ).reshape((-1))
