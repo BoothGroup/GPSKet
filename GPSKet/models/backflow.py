@@ -40,10 +40,6 @@ class Backflow(nn.Module):
         corrections = self.correction_fun(
             x, cache_intermediates=cache_intermediates, update_sites=update_sites
         )  # (B, L, N, T)
-        orbitals = jnp.array(self.orbitals)  # (L, N)
-        corrections = self.correction_fun(
-            x, cache_intermediates=cache_intermediates, update_sites=update_sites
-        )  # (B, L, N, T)
         if cache_intermediates or (update_sites is not None):
             indices_save = self.variable(
                 "intermediates_cache", "samples", lambda: jnp.zeros(0, dtype=x.dtype)
