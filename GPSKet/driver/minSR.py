@@ -126,7 +126,9 @@ class minSRVMC(VMC):
                 + mpi.node_number * self.state.chunk_size
                 + i * self.state.chunk_size * mpi.n_nodes
             )
-            idx_i = (mpi4jax.gather(idx_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(-1)
+            idx_i = (mpi4jax.gather(idx_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
+                -1
+            )
             O_i = nk.jax.jacobian(
                 self.state._apply_fun,
                 self.state.parameters,
@@ -137,7 +139,9 @@ class minSRVMC(VMC):
                 dense=True,
                 center=False,
             )
-            O_i = (mpi4jax.gather(O_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape((-1, *O_i.shape[1:]))
+            O_i = (mpi4jax.gather(O_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
+                (-1, *O_i.shape[1:])
+            )
             if mpi.rank == 0:
                 if len(O_i.shape) == 3:
                     O_i = O_i[:, 0, :] + 1.0j * O_i[:, 1, :]
@@ -148,7 +152,9 @@ class minSRVMC(VMC):
                     + mpi.node_number * self.state.chunk_size
                     + i * self.state.chunk_size * mpi.n_nodes
                 )
-                idx_j = (mpi4jax.gather(idx_j, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(-1)
+                idx_j = (
+                    mpi4jax.gather(idx_j, root=0, comm=mpi.MPI_jax_comm)[0]
+                ).reshape(-1)
                 O_j = nk.jax.jacobian(
                     self.state._apply_fun,
                     self.state.parameters,
@@ -159,7 +165,9 @@ class minSRVMC(VMC):
                     dense=True,
                     center=False,
                 )
-                O_j = (mpi4jax.gather(O_j, root=0, comm=mpi.MPI_jax_comm)[0]).reshape((-1, *O_j.shape[1:]))
+                O_j = (mpi4jax.gather(O_j, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
+                    (-1, *O_j.shape[1:])
+                )
                 if mpi.rank == 0:
                     if len(O_j.shape) == 3:
                         O_j = O_j[:, 0, :] + 1.0j * O_j[:, 1, :]
@@ -168,21 +176,36 @@ class minSRVMC(VMC):
                     OO = OO.at[ii, jj].set(O_i.dot(O_j.conj().T))
 
         # Solve linear system and compute parameters update
-        loc_ens_centered_restacked = mpi4jax.gather(loc_ens_centered, root=0, comm=mpi.MPI_jax_comm)[0]
+        loc_ens_centered_restacked = mpi4jax.gather(
+            loc_ens_centered, root=0, comm=mpi.MPI_jax_comm
+        )[0]
+
         if mpi.rank == 0:
-            loc_ens_centered_restacked = jnp.swapaxes(
-                loc_ens_centered_restacked, 0, 1
-            ).reshape((-1))
+            loc_ens_centered_restacked = jnp.swapaxes(loc_ens_centered_restacked, 0, 1)
+
+            loc_ens_centered_restacked = loc_ens_centered_restacked.reshape((-1))
+
             OO_epsilon = self.solver(OO, loc_ens_centered_restacked)
+
+            OO_epsilon = jnp.swapaxes(
+                OO_epsilon.reshape((n_chunks, mpi.n_nodes, -1)), 0, 1
+            )
         else:
-            OO_epsilon = jnp.zeros((self.state.n_samples,), dtype=jnp.complex128)
-        mpi.MPI_jax_comm.Bcast(OO_epsilon, root=0)
+            OO_epsilon = jnp.zeros(
+                (self.state.n_samples_per_rank,), dtype=jnp.complex128
+            )
+
+        OO_epsilon = mpi4jax.scatter(OO_epsilon, root=0, comm=mpi.MPI_jax_comm)[
+            0
+        ].reshape(-1)
+
         for i in range(n_chunks):
             idx_i = (
                 idx[i]
                 + mpi.node_number * self.state.chunk_size
                 + i * self.state.chunk_size * mpi.n_nodes
             )
+
             O_i = nk.jax.jacobian(
                 self.state._apply_fun,
                 self.state.parameters,
@@ -193,14 +216,16 @@ class minSRVMC(VMC):
                 dense=True,
                 center=False,
             )
+
             if len(O_i.shape) == 3:
                 O_i = O_i[:, 0, :] + 1.0j * O_i[:, 1, :]
+
             O_i = O_i - O_avg
 
             if dense_update is None:
-                dense_update = mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon[idx_i]))[0]
+                dense_update = mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon))[0]
             else:
-                dense_update += mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon[idx_i]))[0]
+                dense_update += mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon))[0]
 
         # Convert back to pytree
         unravel = lambda x: x
