@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from functools import partial
 
 import netket as nk
+import mpi4jax
 from netket import VMC
 from netket.stats import Stats
 from netket.utils import mpi
@@ -78,9 +79,10 @@ class minSRVMC(VMC):
         )
 
         # Initialize neural tangent kernel, gradient of loss and dense update
-        OO = jnp.zeros(
-            (self.state.n_samples, self.state.n_samples), dtype=jnp.complex128
-        )
+        if mpi.rank == 0:
+            OO = jnp.zeros(
+                (self.state.n_samples, self.state.n_samples), dtype=jnp.complex128
+            )
 
         dense_update = None
 
@@ -124,7 +126,7 @@ class minSRVMC(VMC):
                 + mpi.node_number * self.state.chunk_size
                 + i * self.state.chunk_size * mpi.n_nodes
             )
-            idx_i = (mpi.mpi_allgather_jax(idx_i)[0]).reshape(-1)
+            idx_i = (mpi4jax.gather(idx_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(-1)
             O_i = nk.jax.jacobian(
                 self.state._apply_fun,
                 self.state.parameters,
@@ -135,17 +137,18 @@ class minSRVMC(VMC):
                 dense=True,
                 center=False,
             )
-            O_i = (mpi.mpi_allgather_jax(O_i)[0]).reshape((-1, *O_i.shape[1:]))
-            if len(O_i.shape) == 3:
-                O_i = O_i[:, 0, :] + 1.0j * O_i[:, 1, :]
-            O_i = O_i - O_avg
+            O_i = (mpi4jax.gather(O_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape((-1, *O_i.shape[1:]))
+            if mpi.rank == 0:
+                if len(O_i.shape) == 3:
+                    O_i = O_i[:, 0, :] + 1.0j * O_i[:, 1, :]
+                O_i = O_i - O_avg
             for j in range(n_chunks):
                 idx_j = (
                     idx[j]
                     + mpi.node_number * self.state.chunk_size
                     + i * self.state.chunk_size * mpi.n_nodes
                 )
-                idx_j = (mpi.mpi_allgather_jax(idx_j)[0]).reshape(-1)
+                idx_j = (mpi4jax.gather(idx_j, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(-1)
                 O_j = nk.jax.jacobian(
                     self.state._apply_fun,
                     self.state.parameters,
@@ -156,18 +159,24 @@ class minSRVMC(VMC):
                     dense=True,
                     center=False,
                 )
-                O_j = (mpi.mpi_allgather_jax(O_j)[0]).reshape((-1, *O_j.shape[1:]))
-                if len(O_j.shape) == 3:
-                    O_j = O_j[:, 0, :] + 1.0j * O_j[:, 1, :]
-                O_j = O_j - O_avg
-                ii, jj = np.meshgrid(idx_i, idx_j, indexing="ij")
-                OO = OO.at[ii, jj].set(O_i.dot(O_j.conj().T))
+                O_j = (mpi4jax.gather(O_j, root=0, comm=mpi.MPI_jax_comm)[0]).reshape((-1, *O_j.shape[1:]))
+                if mpi.rank == 0:
+                    if len(O_j.shape) == 3:
+                        O_j = O_j[:, 0, :] + 1.0j * O_j[:, 1, :]
+                    O_j = O_j - O_avg
+                    ii, jj = np.meshgrid(idx_i, idx_j, indexing="ij")
+                    OO = OO.at[ii, jj].set(O_i.dot(O_j.conj().T))
 
         # Solve linear system and compute parameters update
-        loc_ens_centered_restacked = jnp.swapaxes(
-            mpi.mpi_allgather_jax(loc_ens_centered)[0], 0, 1
-        ).reshape((-1))
-        OO_epsilon = self.solver(OO, loc_ens_centered_restacked)
+        loc_ens_centered_restacked = mpi4jax.gather(loc_ens_centered, root=0, comm=mpi.MPI_jax_comm)[0]
+        if mpi.rank == 0:
+            loc_ens_centered_restacked = jnp.swapaxes(
+                loc_ens_centered_restacked, 0, 1
+            ).reshape((-1))
+            OO_epsilon = self.solver(OO, loc_ens_centered_restacked)
+        else:
+            OO_epsilon = jnp.zeros((self.state.n_samples,), dtype=jnp.complex128)
+        mpi.MPI_jax_comm.Bcast(OO_epsilon, root=0)
         for i in range(n_chunks):
             idx_i = (
                 idx[i]
