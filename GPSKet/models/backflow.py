@@ -17,7 +17,7 @@ class Backflow(nn.Module):
     hilbert: FermionicDiscreteHilbert
     """The Hilbert space of the wavefunction model"""
     orbitals: HashableArray
-    """Initial orbitals, e.g. Hartree-Fock"""
+    """Mean-field single-particle orbitals, e.g. Hartree-Fock"""
     correction_fun: nn.Module
     """Module that computes the correction to the initial orbitals"""
     apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
@@ -34,7 +34,7 @@ class Backflow(nn.Module):
         norb = self.hilbert.size
         nelec = self.hilbert._n_elec
         # TODO: improve performance by scanning over symmetries
-        orbitals = jnp.array(self.orbitals) # (L, N)
+        orbitals = self.variable("orbitals", "mean_field", lambda : jnp.array(self.orbitals)) # (L, N)
         corrections = self.correction_fun(x, cache_intermediates=cache_intermediates, update_sites=update_sites) # (B, L, N, T)
         if cache_intermediates or (update_sites is not None):
             indices_save = self.variable("intermediates_cache", "samples", lambda : jnp.zeros(0, dtype=x.dtype))
@@ -54,13 +54,13 @@ class Backflow(nn.Module):
         if self.fixed_magnetization:
             y_up, y_dn = jnp.split(y, np.array([nelec[0]]), axis=1)
             if self.spin_symmetry_by_structure:
-                ɸ_up = jnp.take_along_axis(jnp.expand_dims(orbitals, axis=(0,-1)), y_up, axis=1)
-                ɸ_dn = jnp.take_along_axis(jnp.expand_dims(orbitals, axis=(0,-1)), y_dn, axis=1)
+                ɸ_up = jnp.take_along_axis(jnp.expand_dims(orbitals.value, axis=(0,-1)), y_up, axis=1)
+                ɸ_dn = jnp.take_along_axis(jnp.expand_dims(orbitals.value, axis=(0,-1)), y_dn, axis=1)
                 Δ_up = jnp.take_along_axis(corrections, y_up, axis=1)
                 Δ_dn = jnp.take_along_axis(corrections, y_dn, axis=1)
             else:
-                ɸ_up = jnp.take_along_axis(jnp.expand_dims(orbitals[:,:nelec[0]], axis=(0,-1)), y_up, axis=1)
-                ɸ_dn = jnp.take_along_axis(jnp.expand_dims(orbitals[:,nelec[0]:], axis=(0,-1)), y_dn, axis=1)
+                ɸ_up = jnp.take_along_axis(jnp.expand_dims(orbitals.value[:,:nelec[0]], axis=(0,-1)), y_up, axis=1)
+                ɸ_dn = jnp.take_along_axis(jnp.expand_dims(orbitals.value[:,nelec[0]:], axis=(0,-1)), y_dn, axis=1)
                 Δ_up = jnp.take_along_axis(corrections[:,:,:nelec[0],:], y_up, axis=1)
                 Δ_dn = jnp.take_along_axis(corrections[:,:,nelec[0]:,:], y_dn, axis=1)
             ɸ_up = jnp.transpose(ɸ_up, (0,3,1,2)) # (B, T, N, N)
@@ -72,7 +72,7 @@ class Backflow(nn.Module):
             log_det = log_det_up + log_det_dn + jnp.log(s_up*s_dn+0j) # (B, T)
         else:
             y = y.at[:,nelec[0]:,:].add(norb)
-            ɸ = jnp.take_along_axis(jnp.expand_dims(orbitals, axis=(0,-1)), y, axis=1)
+            ɸ = jnp.take_along_axis(jnp.expand_dims(orbitals.value, axis=(0,-1)), y, axis=1)
             Δ = jnp.take_along_axis(corrections, y, axis=1)
             ɸ = jnp.transpose(ɸ, (0,3,1,2)) # (B, T, N, N)
             Δ = jnp.transpose(Δ, (0,3,1,2)) # (B, T, N, N)
