@@ -31,13 +31,13 @@ class ASymmqGPS(nn.Module):
     """Number of determinants"""
     dtype: DType = jnp.complex128
     """Type of the variational parameters"""
-    init_fun : Union[NNInitFunc,Tuple[NNInitFunc,NNInitFunc]] = orthogonal()
+    init_fun: Union[NNInitFunc, Tuple[NNInitFunc, NNInitFunc]] = orthogonal()
     """Initializer for the variational parameters"""
-    coeffs : HashableArray = HashableArray(np.ones(1))
+    coeffs: HashableArray = HashableArray(np.ones(1))
     """Coefficients of the terms in the linear combination of Slater determinants"""
-    apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    apply_symmetries: Callable = lambda inputs: jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
-    symmetrization: str = 'kernel'
+    symmetrization: str = "kernel"
     """Symmetrization method"""
     spin_symmetry_by_structure: bool = False
     """Flag determines whether the S^2 symmetry (with S=0) should be enforced
@@ -51,20 +51,23 @@ class ASymmqGPS(nn.Module):
         assert self.n_determinants == self.coeffs.shape[0]
         if len(x.shape) == 1:
             x = jnp.expand_dims(x, 0)
-        x = jnp.asarray(x, jnp.int32) # (B, L)
+        x = jnp.asarray(x, jnp.int32)  # (B, L)
 
-        if self.symmetrization == 'kernel':
+        if self.symmetrization == "kernel":
+
             def out_transformation(y):
-                y = jnp.asarray(self.coeffs)*jnp.exp(y) # (B, M, S, T)
-                y = jnp.sum(y, axis=1) # (B, S, T)
-                y = jnp.sinh(jnp.sum(y, axis=(-2, -1))) # (B,)
+                y = jnp.asarray(self.coeffs) * jnp.exp(y)  # (B, M, S, T)
+                y = jnp.sum(y, axis=1)  # (B, S, T)
+                y = jnp.sinh(jnp.sum(y, axis=(-2, -1)))  # (B,)
                 y = jnp.log(y)
                 return y
-        elif self.symmetrization == 'projective':
+
+        elif self.symmetrization == "projective":
+
             def out_transformation(y):
-                y = jnp.asarray(self.coeffs)*jnp.exp(y) # (B, M, S, T)
-                y = jnp.sinh(jnp.sum(y, axis=1)) # (B, S, T)
-                y = jnp.sum(y, axis=(-2, -1)) # (B,)
+                y = jnp.asarray(self.coeffs) * jnp.exp(y)  # (B, M, S, T)
+                y = jnp.sinh(jnp.sum(y, axis=1))  # (B, S, T)
+                y = jnp.sum(y, axis=(-2, -1))  # (B,)
                 y = jnp.log(y)
                 return y
 
@@ -76,9 +79,10 @@ class ASymmqGPS(nn.Module):
             symmetries=self.apply_symmetries,
             out_transformation=out_transformation,
             apply_fast_update=self.apply_fast_update,
-            spin_symmetry_by_structure=self.spin_symmetry_by_structure
+            spin_symmetry_by_structure=self.spin_symmetry_by_structure,
         )(x)
         return log_psi
+
 
 class ASymmqGPSProd(nn.Module):
     """
@@ -91,9 +95,9 @@ class ASymmqGPSProd(nn.Module):
     """Number of determinants"""
     dtype: DType = jnp.complex128
     """Type of the variational parameters"""
-    init_fun : NNInitFunc = orthogonal()
+    init_fun: NNInitFunc = orthogonal()
     """Initializer for the variational parameters"""
-    apply_symmetries: Callable = lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    apply_symmetries: Callable = lambda inputs: jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
     spin_symmetry_by_structure: bool = False
     """Flag determines whether the S^2 symmetry (with S=0) should be enforced
@@ -109,12 +113,12 @@ class ASymmqGPSProd(nn.Module):
     def __call__(self, x: Array) -> Array:
         if len(x.shape) == 1:
             x = jnp.expand_dims(x, 0)
-        x = jnp.asarray(x, jnp.int32) # (B, L)
+        x = jnp.asarray(x, jnp.int32)  # (B, L)
 
         def out_transformation(y):
-            y = jnp.exp(y) # (B, M, S, T)
-            y = jnp.prod(jnp.sinh(y), axis=1) # (B, S, T)
-            y = jnp.sum(y, axis=(-2, -1)) # (B,)
+            y = jnp.exp(y)  # (B, M, S, T)
+            y = jnp.prod(jnp.sinh(y), axis=1)  # (B, S, T)
+            y = jnp.sum(y, axis=(-2, -1))  # (B,)
             y = jnp.log(y)
             return y
 
@@ -126,6 +130,6 @@ class ASymmqGPSProd(nn.Module):
             symmetries=self.apply_symmetries,
             out_transformation=out_transformation,
             apply_fast_update=self.apply_fast_update,
-            spin_symmetry_by_structure=self.spin_symmetry_by_structure
+            spin_symmetry_by_structure=self.spin_symmetry_by_structure,
         )(x)
         return log_psi

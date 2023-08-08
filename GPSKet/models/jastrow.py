@@ -18,9 +18,10 @@ def up_down_occupancies(x):
         x_up, x_dn : spin-up and -down occupancies (B, L)
     """
     x = jnp.asarray(x, dtype=jnp.int32)
-    x_up = jnp.asarray(x&1, jnp.int32)
-    x_dn = jnp.asarray((x&2)/2, jnp.int32)
+    x_up = jnp.asarray(x & 1, jnp.int32)
+    x_dn = jnp.asarray((x & 2) / 2, jnp.int32)
     return x_up, x_dn
+
 
 class Jastrow(nn.Module):
     """
@@ -29,11 +30,11 @@ class Jastrow(nn.Module):
 
     hilbert: FermionicDiscreteHilbert
     """The Hilbert space of the wavefunction model"""
-    dtype: DType=jnp.complex128
+    dtype: DType = jnp.complex128
     """Type of the variational parameters"""
-    init_fun: NNInitFunc=normal()
+    init_fun: NNInitFunc = normal()
     """Initializer for the variational parameters"""
-    apply_symmetries: Callable=lambda inputs : jnp.expand_dims(inputs, axis=-1)
+    apply_symmetries: Callable = lambda inputs: jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
 
     @nn.compact
@@ -41,8 +42,12 @@ class Jastrow(nn.Module):
         nsites = x.shape[-1]
         kernel = self.param("kernel", self.init_fun, (nsites, nsites), self.dtype)
         kernel = kernel + kernel.T
-        x = self.apply_symmetries(x) # (B, T)
+        x = self.apply_symmetries(x)  # (B, T)
         x_up, x_dn = up_down_occupancies(x)
         kernel, x_up, x_dn = promote_dtype(kernel, x_up, x_dn, dtype=None)
-        y = jax.vmap(lambda u,d: jnp.einsum("...i,ij,...j", (1-u), kernel, (1-d)), in_axes=(-1,-1), out_axes=-1)(x_up, x_dn)
-        return jnp.sum(y, axis=-1) # (B,)
+        y = jax.vmap(
+            lambda u, d: jnp.einsum("...i,ij,...j", (1 - u), kernel, (1 - d)),
+            in_axes=(-1, -1),
+            out_axes=-1,
+        )(x_up, x_dn)
+        return jnp.sum(y, axis=-1)  # (B,)

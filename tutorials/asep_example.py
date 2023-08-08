@@ -43,7 +43,11 @@ gs = nk.VMC(ha, op, variational_state=vs, preconditioner=sr)
 gs_energy = eigs(ha.to_linear_operator(), which="LR", k=1, return_eigenvectors=False)
 
 # Run optimization
-for it in gs.iter(300,1):
+for it in gs.iter(300, 1):
     en = gs.energy.mean
-    print("Iteration: {}, Energy: {}, Abs. energy_error: {}".format(it, en.real, abs(gs_energy - en)), flush=True)
-
+    print(
+        "Iteration: {}, Energy: {}, Abs. energy_error: {}".format(
+            it, en.real, abs(gs_energy - en)
+        ),
+        flush=True,
+    )

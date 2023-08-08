@@ -12,7 +12,8 @@ from flax.core import freeze
 
 from functools import partial
 
-class ImagTimeStep():
+
+class ImagTimeStep:
     def __init__(self, vstate, hamiltonian):
         self.vstate = vstate
         self.hamiltonian = hamiltonian
@@ -21,7 +22,9 @@ class ImagTimeStep():
         # This is a little bit hacky, the interface should probably be improved at one point
         old_samples = self.vstate._samples
         self.vstate._samples = samples
-        loc_ens = self.vstate.local_estimators(self.hamiltonian, chunk_size=self.vstate.chunk_size)
+        loc_ens = self.vstate.local_estimators(
+            self.hamiltonian, chunk_size=self.vstate.chunk_size
+        )
         self.vstate._samples = old_samples
         return loc_ens
 
@@ -30,6 +33,7 @@ class ImagTimeStep():
         self.log_amps = self.vstate.log_value(samples_reshaped)
         self.local_energies = self.get_local_energies(samples_reshaped)
         return self.log_amps + jnp.log(1 - tau * self.local_energies)
+
 
 def get_imag_time_step_vstate(tau, hamiltonian, vstate):
     """Returns a variational state with a first order imaginary time evolved model (i.e. (1 - tau H)|Psi>)
@@ -54,12 +58,14 @@ def get_imag_time_step_vstate(tau, hamiltonian, vstate):
         local_estimator_fun = get_local_kernel(vstate, hamiltonian)
     else:
         local_estimator_fun = get_local_kernel(vstate, hamiltonian, vstate.chunk_size)
+
     def imag_time_model_log_amp(model_pars, samples):
         pars, tau = freeze(model_pars).pop("tau")
         samps = samples.reshape((-1, samples.shape[-1]))
         loc_ens = local_estimator_fun(log_model, pars, samps, args)
         log_amps = log_model(pars, samps)
-        return log_amps + jnp.log(1/tau - 1 * loc_ens) + jnp.log(tau)
+        return log_amps + jnp.log(1 / tau - 1 * loc_ens) + jnp.log(tau)
+
     new_vstate = copy.deepcopy(vstate)
     new_vstate._apply_fun = imag_time_model_log_amp
     new_vstate._model = wrap_afun(imag_time_model_log_amp)

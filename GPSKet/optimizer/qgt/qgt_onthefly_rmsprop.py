@@ -29,10 +29,11 @@ def mat_vec(jvp_fn, v, diag_shift, ema, eps):
 
     # (1-diag_shift) * res + diag_shift * (sqrt(ema)+eps) * v
     return tree_map(
-        lambda r_, e_, v_: (1-diag_shift) * r_ + diag_shift * (jnp.sqrt(e_) + eps) * v_,
+        lambda r_, e_, v_: (1 - diag_shift) * r_
+        + diag_shift * (jnp.sqrt(e_) + eps) * v_,
         res,
         ema,
-        v
+        v,
     )
 
 
@@ -60,9 +61,12 @@ def QGTOnTheFlyRMSProp(
     from netket.vqs import FullSumState
 
     if isinstance(vstate, FullSumState):
-        raise TypeError("FullSumState is not supported. Use QGTJacobianDenseRMSProp instead.")
+        raise TypeError(
+            "FullSumState is not supported. Use QGTJacobianDenseRMSProp instead."
+        )
 
     from GPSKet.vqs import MCStateUniqueSamples
+
     if isinstance(vstate, MCStateUniqueSamples):
         raise TypeError("Unique samples state with on-the-fly QGT is not supported.")
 
@@ -91,8 +95,9 @@ def QGTOnTheFlyRMSProp(
         ema=ema,
         _mat_vec=mat_vec,
         _params=vstate.parameters,
-        _chunking=chunking
+        _chunking=chunking,
     )
+
 
 @struct.dataclass
 class QGTOnTheFlyRMSPropT(LinearOperator):
@@ -120,6 +125,7 @@ class QGTOnTheFlyRMSPropT(LinearOperator):
 
     def __repr__(self):
         return f"QGTOnTheFlyRMSProp(diag_shift={self.diag_shift})"
+
 
 ########################################################################################
 #####                                  QGT Logic                                   #####
@@ -169,7 +175,6 @@ def onthefly_mat_treevec(
 def _solve(
     self: QGTOnTheFlyRMSPropT, solve_fun, y: PyTree, *, x0: Optional[PyTree], **kwargs
 ) -> PyTree:
-
     check_valid_vector_type(self._params, y)
 
     y = nkjax.tree_cast(y, self._params)

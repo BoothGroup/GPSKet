@@ -29,7 +29,6 @@ def get_gauss_leg_elements_Sy(n_grid):
 #     return (0.5 * jnp.sum(jnp.log(vals)) + jnp.log(1.j) * (n**2))
 
 
-
 """
 This implements the Pfaffian based on the Parlett-Reid algorithm as outlined in arxiv:1102.3440,
 this implementation also borrows heavily from the corresponding codebase (pfapack, https://github.com/basnijholt/pfapack)
@@ -37,31 +36,50 @@ and is essentially just a reimplementation of its pfaffian_LTL method in jax.
 The current implementation involves a for loop which will likely lead to sub-optimal compilation times when jitting this
 but currently this seems to be the best solution to get around the jax limitations of requiring static loop counts.
 """
+
+
 @jax.custom_jvp
 def log_pfaffian(mat):
     # TODO: add some sanity checks here
-    n = mat.shape[0]//2
+    n = mat.shape[0] // 2
     matrix = mat.astype(jnp.complex128)
-    value = 0.
+    value = 0.0
     for count in range(n):
         index = count * 2
         # permute rows/cols for numerical stability
-        largest_index = jnp.argmax(jnp.abs(matrix[index+1:,index]))
+        largest_index = jnp.argmax(jnp.abs(matrix[index + 1 :, index]))
         # exchange rows and columns
-        updated_mat = matrix.at[index + 1, index:].set(matrix[index + largest_index + 1, index:])
-        updated_mat = updated_mat.at[index + largest_index + 1, index:].set(matrix[index+1, index:])
+        updated_mat = matrix.at[index + 1, index:].set(
+            matrix[index + largest_index + 1, index:]
+        )
+        updated_mat = updated_mat.at[index + largest_index + 1, index:].set(
+            matrix[index + 1, index:]
+        )
         matrix = updated_mat
-        updated_mat = matrix.at[index:, index + 1].set(matrix[index:, index + largest_index + 1])
-        updated_mat = updated_mat.at[index:, index + largest_index + 1].set(matrix[index:, index+1])
+        updated_mat = matrix.at[index:, index + 1].set(
+            matrix[index:, index + largest_index + 1]
+        )
+        updated_mat = updated_mat.at[index:, index + largest_index + 1].set(
+            matrix[index:, index + 1]
+        )
         matrix = updated_mat
         # sign picked up
-        value += jnp.where(largest_index != 0, jnp.log(-1 + 0.j), 0.)
+        value += jnp.where(largest_index != 0, jnp.log(-1 + 0.0j), 0.0)
         # value update
-        value = jnp.where(matrix[index+1, index] !=  0., value + jnp.log(matrix[index, index+1]), jnp.NINF + 0.j)
-        t = matrix[index, (index + 2):]/matrix[index, index+1]
-        matrix = matrix.at[index + 2:, index + 2:].add(jnp.outer(t, matrix[index + 2:, index + 1]))
-        matrix = matrix.at[index + 2:, index + 2:].add(-jnp.outer(matrix[index + 2:, index + 1], t))
+        value = jnp.where(
+            matrix[index + 1, index] != 0.0,
+            value + jnp.log(matrix[index, index + 1]),
+            jnp.NINF + 0.0j,
+        )
+        t = matrix[index, (index + 2) :] / matrix[index, index + 1]
+        matrix = matrix.at[index + 2 :, index + 2 :].add(
+            jnp.outer(t, matrix[index + 2 :, index + 1])
+        )
+        matrix = matrix.at[index + 2 :, index + 2 :].add(
+            -jnp.outer(matrix[index + 2 :, index + 1], t)
+        )
     return value
+
 
 @log_pfaffian.defjvp
 def log_pfaffian_jvp(primals, tangents):
@@ -75,22 +93,31 @@ The states which are fed into this model are assumed to be in first quantization
 positions of Ne electrons, where the positions correspond to site and spin (i.e. take values from 1 ... 2 L).
 TODO: We should devise (and stick to) a general framework how the states acting on first quantized inputs should be set up.
 """
+
+
 class PfaffianState(nn.Module):
-    n_sites : int
+    n_sites: int
     init_fun: Callable = normal()
-    dtype: DType =jnp.complex128
+    dtype: DType = jnp.complex128
     symmetries: Callable = lambda y: jnp.expand_dims(y, axis=-1)
-    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(x, axis=(-2, -1))
+    out_transformation: Callable = lambda x: jax.scipy.special.logsumexp(
+        x, axis=(-2, -1)
+    )
+
     @nn.compact
     def __call__(self, y) -> Array:
-        F = self.param("F", self.init_fun, (2 * self.n_sites, 2 * self.n_sites), self.dtype)
+        F = self.param(
+            "F", self.init_fun, (2 * self.n_sites, 2 * self.n_sites), self.dtype
+        )
         y = self.symmetries(y)
+
         def evaluate_symmetries(y_sym):
             F_occ = jnp.take(F, y_sym, axis=0)
             take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
             F_occ = jax.vmap(take_fun)(F_occ, y_sym)
             F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
             return jax.vmap(log_pfaffian)(F_skew)
+
         out = jax.vmap(evaluate_symmetries, in_axes=-1, out_axes=-1)(y)
         """
         because we don't suport the spin rotations in the S^2 projection for this state (yet),
@@ -115,28 +142,48 @@ TODO: Test the symmetrization more extensively.
 TODO: Implement sanity checks for this model.
 TODO: Add documentation for symmetrization interface (+maybe find a more general way of defining it)
 """
+
+
 class ZeroMagnetizationPfaffian(PfaffianState):
     # S2_projection is a tuple where the first element gives the rotation angles for the Sy rotation
     # and the second element are the corresponding characters which should be used
-    S2_projection: Tuple[HashableArray, HashableArray] = (HashableArray(np.array([0.])), HashableArray(np.array([1.])))
+    S2_projection: Tuple[HashableArray, HashableArray] = (
+        HashableArray(np.array([0.0])),
+        HashableArray(np.array([1.0])),
+    )
+
     @nn.compact
     def __call__(self, y) -> Array:
-        n_e_half = y.shape[-1]//2
+        n_e_half = y.shape[-1] // 2
         f = self.param("f", self.init_fun, (self.n_sites, self.n_sites), self.dtype)
         y = self.symmetries(y)
+
         def evaluate_pfaff_rotations(angle):
-            F = jnp.block([[-f * jnp.cos(angle/2) * jnp.sin(angle/2), f * jnp.cos(angle/2) * jnp.cos(angle/2)],
-                           [-f * jnp.sin(angle/2) * jnp.sin(angle/2), f * jnp.cos(angle/2) * jnp.sin(angle/2)]])
+            F = jnp.block(
+                [
+                    [
+                        -f * jnp.cos(angle / 2) * jnp.sin(angle / 2),
+                        f * jnp.cos(angle / 2) * jnp.cos(angle / 2),
+                    ],
+                    [
+                        -f * jnp.sin(angle / 2) * jnp.sin(angle / 2),
+                        f * jnp.cos(angle / 2) * jnp.sin(angle / 2),
+                    ],
+                ]
+            )
+
             def evaluate_symmetries(y_sym):
                 F_occ = jnp.take(F, y_sym, axis=0)
                 take_fun = lambda x0, x1: jnp.take(x0, x1, axis=1)
                 F_occ = jax.vmap(take_fun)(F_occ, y_sym)
                 F_skew = F_occ - jnp.swapaxes(F_occ, 1, 2)
                 return jax.vmap(log_pfaffian)(F_skew)
+
             return jax.vmap(evaluate_symmetries, in_axes=-1, out_axes=-1)(y)
 
-        vals = jax.vmap(evaluate_pfaff_rotations, out_axes=-2)(jnp.array(self.S2_projection[0]))
-        vals += jnp.log(jnp.asarray(self.S2_projection[1])).reshape((-1,1))
+        vals = jax.vmap(evaluate_pfaff_rotations, out_axes=-2)(
+            jnp.array(self.S2_projection[0])
+        )
+        vals += jnp.log(jnp.asarray(self.S2_projection[1])).reshape((-1, 1))
 
         return self.out_transformation(vals)
-

@@ -5,7 +5,10 @@ import numpy as np
 
 from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 from GPSKet.sampler.fermionic_hopping import MetropolisHopping, MetropolisFastHopping
-from GPSKet.operator.hamiltonian.ab_initio import AbInitioHamiltonian, AbInitioHamiltonianOnTheFly
+from GPSKet.operator.hamiltonian.ab_initio import (
+    AbInitioHamiltonian,
+    AbInitioHamiltonianOnTheFly,
+)
 
 from GPSKet.models import qGPS
 
@@ -27,26 +30,23 @@ mol = gto.Mole()
 
 # as an example we set up a ring of 8 Hydrogen atoms with dist 1 a0
 mol.build(
-    atom = [('H', x) for x in ring.make(8, 1)],
-    basis = 'sto-3g',
-    symmetry = True,
-    unit="Bohr"
+    atom=[("H", x) for x in ring.make(8, 1)], basis="sto-3g", symmetry=True, unit="Bohr"
 )
 
 nelec = mol.nelectron
-print('Number of electrons: ', nelec)
+print("Number of electrons: ", nelec)
 
 myhf = scf.RHF(mol)
 ehf = myhf.scf()
 norb = myhf.mo_coeff.shape[1]
-print('Number of molecular orbitals: ', norb)
+print("Number of molecular orbitals: ", norb)
 
 # Get hamiltonian elements
 # 1-electron 'core' hamiltonian terms, transformed into MO basis
 h1 = np.linalg.multi_dot((myhf.mo_coeff.T, myhf.get_hcore(), myhf.mo_coeff))
 
 # Get 2-electron electron repulsion integrals, transformed into MO basis
-eri = ao2mo.incore.general(myhf._eri, (myhf.mo_coeff,)*4, compact=False)
+eri = ao2mo.incore.general(myhf._eri, (myhf.mo_coeff,) * 4, compact=False)
 
 # Previous representation exploited permutational symmetry in storage. Change this to a 4D array.
 # Integrals now stored as h2[p,q,r,s] = (pq|rs) = <pr|qs>. Note 8-fold permutational symmetry.
@@ -54,10 +54,12 @@ h2 = ao2mo.restore(1, eri, norb)
 
 # Transform to a local orbital basis if wanted
 if local_basis:
-    loc_coeff = lo.orth_ao(mol, 'meta_lowdin')
+    loc_coeff = lo.orth_ao(mol, "meta_lowdin")
     ovlp = myhf.get_ovlp()
     # Check that we still have an orthonormal basis, i.e. C^T S C should be the identity
-    assert(np.allclose(np.linalg.multi_dot((loc_coeff.T, ovlp, loc_coeff)),np.eye(norb)))
+    assert np.allclose(
+        np.linalg.multi_dot((loc_coeff.T, ovlp, loc_coeff)), np.eye(norb)
+    )
     # Find the hamiltonian in the local basis
     hij_local = np.linalg.multi_dot((loc_coeff.T, myhf.get_hcore(), loc_coeff))
     hijkl_local = ao2mo.restore(1, ao2mo.kernel(mol, loc_coeff), norb)
@@ -104,7 +106,7 @@ The key elements different from standard netket calculations are:
 """
 
 # Set up Hilbert space
-hi = FermionicDiscreteHilbert(norb, n_elec=(nelec//2,nelec//2))
+hi = FermionicDiscreteHilbert(norb, n_elec=(nelec // 2, nelec // 2))
 
 # Set up ab-initio Hamiltonian
 ha = AbInitioHamiltonianOnTheFly(hi, h1, h2)
@@ -132,7 +134,11 @@ sr = nk.optimizer.SR(qgt=qgt)
 gs = nk.VMC(ha, op, variational_state=vs, preconditioner=sr)
 
 # Run optimization
-for it in gs.iter(1000,1):
+for it in gs.iter(1000, 1):
     en = gs.energy.mean + nuc_en
-    print("Iteration: {}, Energy: {}, Rel. energy_error: {}".format(it, en, abs((gs_energy - en)/gs_energy)), flush=True)
-
+    print(
+        "Iteration: {}, Energy: {}, Rel. energy_error: {}".format(
+            it, en, abs((gs_energy - en) / gs_energy)
+        ),
+        flush=True,
+    )

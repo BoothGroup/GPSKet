@@ -4,6 +4,7 @@ import jax
 
 import jax.numpy as jnp
 
+
 @nk.hilbert.random.random_state.dispatch
 def random_state(hilb: ASEPDiscreteHilbert, key, batches: int, *, dtype=jnp.uint8):
     shape = (batches, hilb.size)

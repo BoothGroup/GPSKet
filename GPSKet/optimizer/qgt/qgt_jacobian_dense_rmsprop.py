@@ -14,6 +14,7 @@ from GPSKet.vqs import MCStateUniqueSamples
 
 from functools import partial
 
+
 def QGTJacobianDenseRMSProp(
     vstate=None,
     ema=None,
@@ -28,9 +29,15 @@ def QGTJacobianDenseRMSProp(
         raise ValueError("Cannot specify both `mode` and `holomorphic`.")
 
     if vstate is None:
-        return partial(QGTJacobianDenseRMSProp, mode=mode, holomorphic=holomorphic,
-                       diag_shift=diag_shift, eps=eps, chunk_size=chunk_size, **kwargs)
-
+        return partial(
+            QGTJacobianDenseRMSProp,
+            mode=mode,
+            holomorphic=holomorphic,
+            diag_shift=diag_shift,
+            eps=eps,
+            chunk_size=chunk_size,
+            **kwargs,
+        )
 
     assert diag_shift >= 0.0 and diag_shift <= 1.0
 
@@ -57,7 +64,9 @@ def QGTJacobianDenseRMSProp(
         )
 
     if mode == "holomorphic":
-        raise ValueError("Mode cannot be holomorphic for the QGT with RMSProp diagonal shift")
+        raise ValueError(
+            "Mode cannot be holomorphic for the QGT with RMSProp diagonal shift"
+        )
 
     if chunk_size is None and hasattr(vstate, "chunk_size"):
         chunk_size = vstate.chunk_size
@@ -90,6 +99,7 @@ def QGTJacobianDenseRMSProp(
         _params_structure=pars_struct,
         **kwargs,
     )
+
 
 @struct.dataclass
 class QGTJacobianDenseRMSPropT(LinearOperator):
@@ -148,23 +158,27 @@ class QGTJacobianDenseRMSPropT(LinearOperator):
         # Compute diagonal shift and apply it to S matrix
         ema, _ = convert_tree_to_dense_format(self.ema, self.mode)
         diag = jnp.diag(jnp.sqrt(ema) + self.eps)
-        return (1-self.diag_shift)*S + self.diag_shift * diag
+        return (1 - self.diag_shift) * S + self.diag_shift * diag
 
     def __repr__(self):
         return (
             f"QGTJacobianDenseRMSProp(diag_shift={self.diag_shift}, mode={self.mode})"
         )
 
+
 ########################################################################################
 #####                                  QGT Logic                                   #####
 ########################################################################################
 
 
-def mat_vec(v: PyTree, O: PyTree, diag_shift: Scalar, ema: PyTree, eps: Scalar) -> PyTree:
+def mat_vec(
+    v: PyTree, O: PyTree, diag_shift: Scalar, ema: PyTree, eps: Scalar
+) -> PyTree:
     w = O @ v
     res = jnp.tensordot(w.conj(), O, axes=w.ndim).conj()
     res = mpi.mpi_sum_jax(res)[0]
-    return (1-diag_shift) * res + diag_shift * (jnp.sqrt(ema) + eps) * v
+    return (1 - diag_shift) * res + diag_shift * (jnp.sqrt(ema) + eps) * v
+
 
 def convert_tree_to_dense_format(vec, mode, *, disable=False):
     """
