@@ -13,6 +13,7 @@ from GPSKet.nn import VerticalStackConv, HorizontalStackConv, CausalConv2d
 
 default_kernel_init = lecun_normal()
 
+
 class AbstractARNN(nk.models.AbstractARNN):
     """Overrides the abstract class from NetKet in order to allow constrained Hilbert spaces"""
 
@@ -23,6 +24,7 @@ class AbstractARNN(nk.models.AbstractARNN):
             raise ValueError(
                 f"Only homogeneous Hilbert spaces are supported by ARNN, but hilbert is a {type(self.hilbert)}."
             )
+
 
 class PixelCNN(AbstractARNN):
     """
@@ -59,7 +61,7 @@ class PixelCNN(AbstractARNN):
     # - N = number of size, i.e. Hilbert space size
     # - L = number of sites per linear dimension
     # - T = number of symmetries
-    
+
     def setup(self):
         # Set system dimensions
         self._D = self.hilbert.local_size
@@ -67,7 +69,7 @@ class PixelCNN(AbstractARNN):
         self._L = int(sqrt(self._N))
         if self._L**2 != self._N:
             raise ValueError(f"Number of sites ({self._N}) is not a square number")
-        
+
         # Setup layers
         self._activation = nk.nn.activation.reim_relu
         self._v_stack_conv = VerticalStackConv(
@@ -76,7 +78,7 @@ class PixelCNN(AbstractARNN):
             mask_center=True,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
         self._h_stack_conv = HorizontalStackConv(
             self.n_channels,
@@ -84,7 +86,7 @@ class PixelCNN(AbstractARNN):
             mask_center=True,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
         self._causal_conv_layers = [
             CausalConv2d(
@@ -93,8 +95,9 @@ class PixelCNN(AbstractARNN):
                 activation=self._activation,
                 param_dtype=self.param_dtype,
                 kernel_init=self.kernel_init,
-                bias_init=self.bias_init
-            ) for _ in range(self.depth)
+                bias_init=self.bias_init,
+            )
+            for _ in range(self.depth)
         ]
         self._final_conv = MaskedConv2D(
             features=self._D,
@@ -103,9 +106,9 @@ class PixelCNN(AbstractARNN):
             exclusive=False,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
-    
+
     def conditionals_log_psi(self, inputs: Array) -> Array:
         # Compute log probabilities by propagating inputs through the network
         batch_size = inputs.shape[0]
@@ -114,9 +117,9 @@ class PixelCNN(AbstractARNN):
         for layer in self._causal_conv_layers:
             v_stack, h_stack = layer(v_stack, h_stack)
         out = self._activation(h_stack)
-        out = self._final_conv(out) # (B, L, L, D)
-        log_psi = jnp.reshape(out, (batch_size, self._N, self._D)) # (B, N, D)
-        
+        out = self._final_conv(out)  # (B, L, L, D)
+        log_psi = jnp.reshape(out, (batch_size, self._N, self._D))  # (B, N, D)
+
         # Enforce gauge symmetry by setting log probabilities to -inf where gauge is broken
         if self.gauge_fn is not None and self.constraint_fn is not None:
             gauge = self.gauge_fn(inputs)

@@ -12,20 +12,16 @@ from .solvers import pinv
 
 @dataclass
 class SRDense(AbstractLinearPreconditioner):
-
-    def __init__(
-        self,
-        qgt: QGTJacobianDense,
-        solver: Callable = pinv
-    ):
+    def __init__(self, qgt: QGTJacobianDense, solver: Callable = pinv):
         self.qgt_constructor = qgt
         super().__init__(solver)
-
 
     def lhs_constructor(self, vstate: VariationalState, step: Optional[Scalar] = None):
         return self.qgt_constructor(vstate)
 
-    def __call__(self, vstate: VariationalState, gradient: PyTree, step: Optional[Scalar] = None) -> PyTree:
+    def __call__(
+        self, vstate: VariationalState, gradient: PyTree, step: Optional[Scalar] = None
+    ) -> PyTree:
         # Ravel gradient
         gradient, unravel_fun = nkjax.tree_ravel(gradient)
 

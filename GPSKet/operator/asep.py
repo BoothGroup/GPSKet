@@ -3,12 +3,13 @@ from numba import jit
 
 @jit(nopython=True)
 def apply_creation(create_site, x_prime):
-    multiplicator = 1-x_prime[create_site]
+    multiplicator = 1 - x_prime[create_site]
 
     if multiplicator != 0:
         x_prime[create_site] = 1
 
     return multiplicator
+
 
 @jit(nopython=True)
 def apply_annihilation(annihilate_site, x_prime):
@@ -18,6 +19,7 @@ def apply_annihilation(annihilate_site, x_prime):
         x_prime[annihilate_site] = 0
 
     return multiplicator
+
 
 @jit(nopython=True)
 def apply_hopping(annihilate_site, create_site, x_prime):

@@ -3,11 +3,13 @@ import jax.numpy as jnp
 from flax import struct
 from netket.sampler.rules.exchange import ExchangeRule_
 
+
 @struct.dataclass
 class ExchangeRuleWithUpdate(ExchangeRule_):
     """
     Exchange Update rule which also returns the list of affected sites which is required for the fast metropolis sampler
     """
+
     returns_updates: bool = True
 
     def transition(rule, sampler, machine, parameters, state, key, σ):

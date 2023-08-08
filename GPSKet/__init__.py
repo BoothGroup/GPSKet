@@ -14,7 +14,7 @@ __all__ = [
     "hilbert",
     "driver",
     "datasets",
-    "vqs"
+    "vqs",
 ]
 
 from . import models

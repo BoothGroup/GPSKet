@@ -10,6 +10,7 @@ default_kernel_init = lecun_normal()
 # Part of the code was inspired by the tutorial on autoregressive image modelling at
 # https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/JAX/tutorial12/Autoregressive_Image_Modeling.html
 
+
 class MaskedConv2D(nn.Module):
     features: int
     mask: np.ndarray
@@ -36,9 +37,10 @@ class MaskedConv2D(nn.Module):
             mask=mask_ext,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )(x)
         return x
+
 
 class VerticalStackConv(nn.Module):
     features: int
@@ -52,20 +54,21 @@ class VerticalStackConv(nn.Module):
     def setup(self):
         # Mask out all sites on the same row
         mask = np.ones((self.kernel_size, self.kernel_size), dtype=np.float32)
-        mask[self.kernel_size//2+1:, :] = 0
+        mask[self.kernel_size // 2 + 1 :, :] = 0
         if self.mask_center:
-            mask[self.kernel_size//2, :] = 0
+            mask[self.kernel_size // 2, :] = 0
         self.conv = MaskedConv2D(
             features=self.features,
             mask=mask,
             dilation=self.dilation,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
 
     def __call__(self, x):
         return self.conv(x)
+
 
 class HorizontalStackConv(nn.Module):
     features: int
@@ -79,21 +82,22 @@ class HorizontalStackConv(nn.Module):
     def setup(self):
         # Mask out all sites on the left of the same row
         mask = np.ones((1, self.kernel_size), dtype=np.float32)
-        mask[0, self.kernel_size//2+1:] = 0
+        mask[0, self.kernel_size // 2 + 1 :] = 0
         if self.mask_center:
-            mask[0, self.kernel_size//2] = 0
+            mask[0, self.kernel_size // 2] = 0
         self.conv = MaskedConv2D(
             features=self.features,
             mask=mask,
             dilation=self.dilation,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
 
     def __call__(self, x: Array) -> Array:
         return self.conv(x)
-    
+
+
 class CausalConv2d(nn.Module):
     n_channels: int = 32
     kernel_size: int = 3
@@ -110,7 +114,7 @@ class CausalConv2d(nn.Module):
             mask_center=False,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
         self.conv_h = HorizontalStackConv(
             features=self.n_channels,
@@ -118,7 +122,7 @@ class CausalConv2d(nn.Module):
             mask_center=False,
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
         self.conv_v_to_h = nn.Conv(
             features=self.n_channels,
@@ -126,7 +130,7 @@ class CausalConv2d(nn.Module):
             kernel_dilation=(1, 1),
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
         self.conv_h_to_1x1 = nn.Conv(
             features=self.n_channels,
@@ -134,7 +138,7 @@ class CausalConv2d(nn.Module):
             kernel_dilation=(1, 1),
             param_dtype=self.param_dtype,
             kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            bias_init=self.bias_init,
         )
 
     def __call__(self, v_stack: Array, h_stack: Array) -> Array:

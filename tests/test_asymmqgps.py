@@ -16,8 +16,12 @@ n_dets = 3
 g = nk.graph.Chain(L, pbc=True)
 symmetries = g.automorphisms().to_array().T
 n_syms = symmetries.shape[-1]
+
+
 def apply_symmetries(y):
     return jax.vmap(lambda tau: jnp.take(tau, y), in_axes=-1, out_axes=-1)(symmetries)
+
+
 hi = FermionicDiscreteHilbert(L, n_elec=n_elec)
 x = hi.random_state(key_in, B)
 
@@ -28,23 +32,23 @@ ma = ASymmqGPS(hi, n_dets, dtype=dtype, apply_symmetries=apply_symmetries)
 variables = ma.init(key_ma, x)
 log_psi_test = ma.apply(variables, x)
 log_psi_true = np.zeros(B, dtype)
-params = variables.unfreeze()['params']
-orbitals_up = params['Slater_0']['U_up']
-orbitals_down = params['Slater_0']['U_down']
+params = variables.unfreeze()["params"]
+orbitals_up = params["Slater_0"]["U_up"]
+orbitals_down = params["Slater_0"]["U_down"]
 y = occupancies_to_electrons(x.astype(jnp.int32), n_elec)
 y_t = apply_symmetries(y)
 for i in tqdm(range(B), desc="Test #1: ASymmqGPS - kernel"):
-    sum_over_syms = 0.0+0j
+    sum_over_syms = 0.0 + 0j
     for j in range(n_syms):
-        y_up = y_t[i,:n_elec[0],j]
-        y_down = y_t[i,n_elec[0]:,j]
-        sum_over_dets = 0.0+0j
+        y_up = y_t[i, : n_elec[0], j]
+        y_down = y_t[i, n_elec[0] :, j]
+        sum_over_dets = 0.0 + 0j
         for k in range(n_dets):
             phi_up = orbitals_up[k, y_up, :]
             phi_down = orbitals_down[k, y_down, :]
             (s_up, log_det_up) = jnp.linalg.slogdet(phi_up)
             (s_down, log_det_down) = jnp.linalg.slogdet(phi_down)
-            log_sd = log_det_up + log_det_down + jnp.log(s_up*s_down+0j)
+            log_sd = log_det_up + log_det_down + jnp.log(s_up * s_down + 0j)
             sum_over_dets += np.exp(log_sd)
         sum_over_syms += sum_over_dets
     if np.issubdtype(dtype, np.complexfloating):
@@ -56,27 +60,33 @@ np.testing.assert_allclose(log_psi_test, log_psi_true)
 # Test #2: evaluate ASymmqGPS with projective symmetrization
 # Amplitudes should be equal to:
 # Ψ(x) = ∑_τ sinh(∑_k det(ɸ_k^↑(τx))det(ɸ_k^↓(τx)))
-ma = ASymmqGPS(hi, n_dets, dtype=dtype, apply_symmetries=apply_symmetries, symmetrization='projective')
+ma = ASymmqGPS(
+    hi,
+    n_dets,
+    dtype=dtype,
+    apply_symmetries=apply_symmetries,
+    symmetrization="projective",
+)
 variables = ma.init(key_ma, x)
 log_psi_test = ma.apply(variables, x)
 log_psi_true = np.zeros(B, dtype)
-params = variables.unfreeze()['params']
-orbitals_up = params['Slater_0']['U_up']
-orbitals_down = params['Slater_0']['U_down']
+params = variables.unfreeze()["params"]
+orbitals_up = params["Slater_0"]["U_up"]
+orbitals_down = params["Slater_0"]["U_down"]
 y = occupancies_to_electrons(x.astype(jnp.int32), n_elec)
 y_t = apply_symmetries(y)
 for i in tqdm(range(B), desc="Test #2: ASymmqGPS - projective"):
-    sum_over_syms = 0.0+0j
+    sum_over_syms = 0.0 + 0j
     for j in range(n_syms):
-        y_up = y_t[i,:n_elec[0],j]
-        y_down = y_t[i,n_elec[0]:,j]
-        sum_over_dets = 0.0+0j
+        y_up = y_t[i, : n_elec[0], j]
+        y_down = y_t[i, n_elec[0] :, j]
+        sum_over_dets = 0.0 + 0j
         for k in range(n_dets):
             phi_up = orbitals_up[k, y_up, :]
             phi_down = orbitals_down[k, y_down, :]
             (s_up, log_det_up) = jnp.linalg.slogdet(phi_up)
             (s_down, log_det_down) = jnp.linalg.slogdet(phi_down)
-            log_sd = log_det_up + log_det_down + jnp.log(s_up*s_down+0j)
+            log_sd = log_det_up + log_det_down + jnp.log(s_up * s_down + 0j)
             sum_over_dets += np.exp(log_sd)
         sum_over_syms += np.sinh(sum_over_dets)
     if np.issubdtype(dtype, np.complexfloating):
@@ -92,23 +102,23 @@ ma = ASymmqGPSProd(hi, n_dets, dtype=dtype, apply_symmetries=apply_symmetries)
 variables = ma.init(key_ma, x)
 log_psi_test = ma.apply(variables, x)
 log_psi_true = np.zeros(B, dtype)
-params = variables.unfreeze()['params']
-orbitals_up = params['Slater_0']['U_up']
-orbitals_down = params['Slater_0']['U_down']
+params = variables.unfreeze()["params"]
+orbitals_up = params["Slater_0"]["U_up"]
+orbitals_down = params["Slater_0"]["U_down"]
 y = occupancies_to_electrons(x.astype(jnp.int32), n_elec)
 y_t = apply_symmetries(y)
 for i in tqdm(range(B), desc="Test #3: ASymmqGPSProd"):
-    sum_over_syms = 0.0+0j
+    sum_over_syms = 0.0 + 0j
     for j in range(n_syms):
-        y_up = y_t[i,:n_elec[0],j]
-        y_down = y_t[i,n_elec[0]:,j]
-        prod_over_dets = 1.0+0j
+        y_up = y_t[i, : n_elec[0], j]
+        y_down = y_t[i, n_elec[0] :, j]
+        prod_over_dets = 1.0 + 0j
         for k in range(n_dets):
             phi_up = orbitals_up[k, y_up, :]
             phi_down = orbitals_down[k, y_down, :]
             (s_up, log_det_up) = jnp.linalg.slogdet(phi_up)
             (s_down, log_det_down) = jnp.linalg.slogdet(phi_down)
-            log_sd = log_det_up + log_det_down + jnp.log(s_up*s_down+0j)
+            log_sd = log_det_up + log_det_down + jnp.log(s_up * s_down + 0j)
             prod_over_dets *= np.sinh(np.exp(log_sd))
         sum_over_syms += prod_over_dets
     if np.issubdtype(dtype, np.complexfloating):

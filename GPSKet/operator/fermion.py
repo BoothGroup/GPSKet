@@ -6,8 +6,11 @@ from numba import jit
 from netket.operator import DiscreteOperator
 from GPSKet.hilbert.discrete_fermion import FermionicDiscreteHilbert
 
+
 @jit(nopython=True)
-def apply_hopping(annihilate_site, create_site, x_prime, spin_int, cummulative_count=None):
+def apply_hopping(
+    annihilate_site, create_site, x_prime, spin_int, cummulative_count=None
+):
     start_occ = x_prime[annihilate_site]
     final_occ = x_prime[create_site]
 
@@ -22,9 +25,13 @@ def apply_hopping(annihilate_site, create_site, x_prime, spin_int, cummulative_c
                 right_limit = max(annihilate_site, create_site) - 1
 
                 if cummulative_count is None:
-                    parity_count = np.sum((x_prime[left_limit:right_limit] & spin_int).astype(np.bool8))
+                    parity_count = np.sum(
+                        (x_prime[left_limit:right_limit] & spin_int).astype(np.bool8)
+                    )
                 else:
-                    parity_count = cummulative_count[right_limit] - cummulative_count[left_limit]
+                    parity_count = (
+                        cummulative_count[right_limit] - cummulative_count[left_limit]
+                    )
 
                 multiplicator = 1
 
@@ -39,11 +46,13 @@ def apply_hopping(annihilate_site, create_site, x_prime, spin_int, cummulative_c
 
     return multiplicator
 
+
 class FermionicDiscreteOperator(DiscreteOperator):
     """
     Base class for discrete Fermionic operators.
     Maybe we want to add some common logic to this class,
     at the moment this class is an empty super class for concrete fermionic implementations.
     """
+
     def __init__(self, hilbert: FermionicDiscreteHilbert):
         super().__init__(hilbert)

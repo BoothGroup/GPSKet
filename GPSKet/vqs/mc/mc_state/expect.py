@@ -16,8 +16,11 @@ additional arguments to the model apply function (e.g. required for fast updates
 Ultimately this should probably at one point be merged into NetKet.
 """
 
+
 @nk.vqs.expect.dispatch
-def expect_chunked(vstate: MCState, op: nk.operator.AbstractOperator, chunk_size: int) -> Stats:  # noqa: F811
+def expect_chunked(
+    vstate: MCState, op: nk.operator.AbstractOperator, chunk_size: int
+) -> Stats:  # noqa: F811
     samples, args = get_local_kernel_arguments(vstate, op)
     local_estimator_fun = get_local_kernel(vstate, op, chunk_size)
     return _expect(

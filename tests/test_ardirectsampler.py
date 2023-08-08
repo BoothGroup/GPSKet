@@ -21,23 +21,19 @@ batch_size = 20
 
 # Compute samples per rank
 if batch_size % n_nodes != 0:
-    raise ValueError("Define a number of samples that is a multiple of the number of MPI ranks")
+    raise ValueError(
+        "Define a number of samples that is a multiple of the number of MPI ranks"
+    )
 samples_per_rank = batch_size // n_nodes
 
 # Setup
 g = nk.graph.Chain(length=L, pbc=True)
-hi = nk.hilbert.Spin(s=1/2, N=g.n_nodes)
+hi = nk.hilbert.Spin(s=1 / 2, N=g.n_nodes)
 ha = nk.operator.Heisenberg(hilbert=hi, graph=g, sign_rule=False)
-arqgps = ARqGPS(
-    hi, M,
-    dtype=dtype)
+arqgps = ARqGPS(hi, M, dtype=dtype)
 symmetries = g.automorphisms().to_array().T
 apply_symmetries = lambda x: jnp.take(x, symmetries, axis=-1)
-arqgps_symm = ARqGPS(
-    hi, M,
-    dtype=dtype,
-    apply_symmetries=apply_symmetries
-)
+arqgps_symm = ARqGPS(hi, M, dtype=dtype, apply_symmetries=apply_symmetries)
 
 # Test #1
 # Shape of sample should be (1, samples_per_rank, L)
@@ -67,16 +63,13 @@ np.testing.assert_equal(samples.shape, (1, samples_per_rank, L))
 # When sampling from a constrained Hilbert space,
 # autoregressive models should generate samples with
 # same total magnetization
-hi = nk.hilbert.Spin(s=1/2, N=g.n_nodes, total_sz=0)
+hi = nk.hilbert.Spin(s=1 / 2, N=g.n_nodes, total_sz=0)
 arqgps = ARqGPS(
-    hi, M,
+    hi,
+    M,
     dtype=dtype,
 )
-arqgps_symm = ARqGPS(
-    hi, M,
-    dtype=dtype,
-    apply_symmetries=apply_symmetries
-)
+arqgps_symm = ARqGPS(hi, M, dtype=dtype, apply_symmetries=apply_symmetries)
 sa = ARDirectSampler(hi, n_chains_per_rank=samples_per_rank)
 vs = nk.vqs.MCState(sa, arqgps, n_samples=batch_size)
 samples = vs.sample()
@@ -93,6 +86,6 @@ np.testing.assert_equal(np.sum(np.squeeze(samples), axis=-1), np.zeros(batch_siz
 
 # Test #3
 # Changing sample batch size shouldn't be a problem
-samples = vs.sample(n_samples=2*batch_size)
+samples = vs.sample(n_samples=2 * batch_size)
 print(samples.shape)
 np.testing.assert_equal(samples.shape, (2, batch_size, L))

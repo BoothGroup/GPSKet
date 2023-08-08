@@ -48,7 +48,7 @@ class ARDirectSampler(Sampler):
     def _init_cache(sampler, model, σ, key):
         # FIXME: hacky solution to make sure cache of FastARQGPS._conditional
         # is not updated during init
-        if hasattr(model, 'plaquettes'):
+        if hasattr(model, "plaquettes"):
             L = sampler.hilbert.size
             scan_init = (-1, np.zeros(L), np.arange(L))
         else:
@@ -90,11 +90,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         new_key, key = jax.random.split(key)
 
         p, mutables = model.apply(
-            _variables,
-            σ,
-            args,
-            method=model._conditional,
-            mutable=["cache"]
+            _variables, σ, args, method=model._conditional, mutable=["cache"]
         )
         if "cache" in mutables:
             cache = mutables["cache"]
@@ -103,7 +99,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
 
         local_states = jnp.asarray(sampler.hilbert.local_states, dtype=sampler.dtype)
         new_σ = batch_choice(key, local_states, p)
-        if hasattr(model, 'plaquettes'):
+        if hasattr(model, "plaquettes"):
             index = args[0]
         else:
             index = args
@@ -126,7 +122,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
     cache = sampler._init_cache(model, σ, key_init)
 
     indices = jnp.arange(sampler.hilbert.size)
-    if hasattr(model, 'plaquettes'):
+    if hasattr(model, "plaquettes"):
         masks = np.asarray(model.masks, np.int32)
         plaquettes = np.asarray(model.plaquettes, np.int32)
         scan_init = (indices, masks, plaquettes)
@@ -134,7 +130,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         scan_init = indices
 
     use_scan = True
-    if hasattr(model, 'M'):
+    if hasattr(model, "M"):
         if isinstance(model.M, HashableArray):
             use_scan = False
 
@@ -146,11 +142,18 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         )
     else:
         for i in range(sampler.hilbert.size):
-            if hasattr(model, 'plaquettes'):
+            if hasattr(model, "plaquettes"):
                 masks = np.asarray(model.masks, np.int32)
                 plaquettes = np.asarray(model.plaquettes, np.int32)
                 scan_init = (indices, masks, plaquettes)
-                (σ, cache, key_scan), _ = scan_fun((σ, cache, key_scan), (i, np.asarray(model.masks, np.int32)[i], np.asarray(model.plaquettes, np.int32)[i]))
+                (σ, cache, key_scan), _ = scan_fun(
+                    (σ, cache, key_scan),
+                    (
+                        i,
+                        np.asarray(model.masks, np.int32)[i],
+                        np.asarray(model.plaquettes, np.int32)[i],
+                    ),
+                )
             else:
                 (σ, cache, key_scan), _ = scan_fun((σ, cache, key_scan), i)
 
@@ -160,11 +163,13 @@ def _sample_chain(sampler, model, variables, state, chain_length):
     else:
         syms = model.apply_symmetries
 
-    σ = syms(σ) # (B, L, T)
+    σ = syms(σ)  # (B, L, T)
 
     # Sample transformations uniformly
     r = jax.random.randint(key_symm, shape=(batch_size,), minval=0, maxval=σ.shape[-1])
-    σ = jnp.take_along_axis(σ, jnp.expand_dims(r, axis=(-2,-1)), axis=-1).reshape(σ.shape[:-1]) # (B, L)
+    σ = jnp.take_along_axis(σ, jnp.expand_dims(r, axis=(-2, -1)), axis=-1).reshape(
+        σ.shape[:-1]
+    )  # (B, L)
 
     σ = σ.reshape((chain_length, sampler.n_chains_per_rank, sampler.hilbert.size))
 

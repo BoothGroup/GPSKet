@@ -1,8 +1,5 @@
 import numpy as np
-from netket.utils.mpi import (
-    MPI_py_comm as MPI_comm,
-    node_number as MPI_rank
-)
+from netket.utils.mpi import MPI_py_comm as MPI_comm, node_number as MPI_rank
 from ml_collections import ConfigDict
 
 
@@ -10,7 +7,7 @@ def get_config() -> ConfigDict:
     """Returns base config values other than system, model, sampler, variational state and optimizer parameters."""
 
     config = ConfigDict()
-    
+
     # Maximum number of optimization steps
     config.max_steps = 100
     # How often to report progress
@@ -32,6 +29,7 @@ def get_config() -> ConfigDict:
 
     return config
 
+
 def resolve(config: ConfigDict) -> ConfigDict:
     # Set random seed
     if MPI_rank == 0:
@@ -39,11 +37,14 @@ def resolve(config: ConfigDict) -> ConfigDict:
     else:
         seed = None
     seed = MPI_comm.bcast(seed, root=0)
-    if config.variational_state_name != 'FullSumState' and config.variational_state.get('seed', None) is None:
+    if (
+        config.variational_state_name != "FullSumState"
+        and config.variational_state.get("seed", None) is None
+    ):
         config.variational_state.seed = seed
 
     # Resolve molecular configuration
-    if 'set_molecule' in config.system and callable(config.system.set_molecule):
+    if "set_molecule" in config.system and callable(config.system.set_molecule):
         config = config.system.set_molecule(config)
         with config.ignore_type():
             # Replace the function with its name so we know how the molecule was set
@@ -53,7 +54,7 @@ def resolve(config: ConfigDict) -> ConfigDict:
 
     # Support dimension can be int or tuple
     if isinstance(config.model.M, str):
-        M = config.model.M.split(',')
+        M = config.model.M.split(",")
         if len(M) > 1:
             M = tuple(map(int, M))
         else:

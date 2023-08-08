@@ -23,28 +23,48 @@ class ARStateFitting(AbstractStateFittingDriver):
         *args,
         variational_state=None,
         mini_batch_size: int = 32,
-        seed: Optional[SeedT]=None,
-        **kwargs
+        seed: Optional[SeedT] = None,
+        **kwargs,
     ):
-        super().__init__(dataset, hamiltonian, optimizer, *args, variational_state=variational_state, mini_batch_size=mini_batch_size, seed=seed, **kwargs)
+        super().__init__(
+            dataset,
+            hamiltonian,
+            optimizer,
+            *args,
+            variational_state=variational_state,
+            mini_batch_size=mini_batch_size,
+            seed=seed,
+            **kwargs,
+        )
 
-        if not hasattr(self._variational_state.model, 'conditionals'):
-            raise ValueError(
-                f"{self._variational_state.model} is not autoregressive."
-            )
+        if not hasattr(self._variational_state.model, "conditionals"):
+            raise ValueError(f"{self._variational_state.model} is not autoregressive.")
 
-        self._probas = np.abs(self._dataset[1])**2
+        self._probas = np.abs(self._dataset[1]) ** 2
         self._ids = np.arange(self._size_dataset)
-        
 
     def _forward_and_backward(self):
         # Sample mini-batch
         self._key, _ = jax.random.split(self._key)
-        mini_batch_ids = jax.random.choice(self._key, self._ids, (self._mini_batch_size,), p=self._probas, replace=False)
-        mini_batch = (self._dataset[0][mini_batch_ids], self._dataset[1][mini_batch_ids])
+        mini_batch_ids = jax.random.choice(
+            self._key,
+            self._ids,
+            (self._mini_batch_size,),
+            p=self._probas,
+            replace=False,
+        )
+        mini_batch = (
+            self._dataset[0][mini_batch_ids],
+            self._dataset[1][mini_batch_ids],
+        )
 
         # Compute loss and gradient
-        self.loss, self._loss_grad = _loss_and_grad(self.state.parameters, self.state.model_state, self.state._apply_fun, mini_batch)
+        self.loss, self._loss_grad = _loss_and_grad(
+            self.state.parameters,
+            self.state.model_state,
+            self.state._apply_fun,
+            mini_batch,
+        )
 
         return self._loss_grad
 
@@ -71,13 +91,16 @@ class ARStateFitting(AbstractStateFittingDriver):
 def _loss(params, model_state, logpsi, mini_batch):
     # TODO: this might need some chunking/vmapping
     x, y = mini_batch
-    model_amplitudes = logpsi({'params': params, **model_state}, x)
-    loss = jnp.mean(jnp.abs(jnp.exp(model_amplitudes)-y)**2)
+    model_amplitudes = logpsi({"params": params, **model_state}, x)
+    loss = jnp.mean(jnp.abs(jnp.exp(model_amplitudes) - y) ** 2)
     return loss
+
 
 @partial(jax.jit, static_argnums=2)
 def _loss_and_grad(params, model_state, logpsi, mini_batch):
-    loss, grad = jax.value_and_grad(_loss, argnums=0)(params, model_state, logpsi, mini_batch)
+    loss, grad = jax.value_and_grad(_loss, argnums=0)(
+        params, model_state, logpsi, mini_batch
+    )
     loss, _ = mpi.mpi_mean_jax(loss)
     grad = jax.tree_util.tree_map(lambda p: mpi.mpi_sum_jax(p)[0], grad)
     grad = jax.tree_map(jnp.conj, grad)
