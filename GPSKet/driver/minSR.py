@@ -192,20 +192,12 @@ class minSRVMC(VMC):
             )
         else:
             OO_epsilon = jnp.zeros(
-                (self.state.n_samples_per_rank,), dtype=jnp.complex128
+                (n_chunks, self.state.chunk_size), dtype=jnp.complex128
             )
 
-        OO_epsilon = mpi4jax.scatter(OO_epsilon, root=0, comm=mpi.MPI_jax_comm)[
-            0
-        ].reshape(-1)
+        OO_epsilon = mpi4jax.scatter(OO_epsilon, root=0, comm=mpi.MPI_jax_comm)[0]
 
         for i in range(n_chunks):
-            idx_i = (
-                idx[i]
-                + mpi.node_number * self.state.chunk_size
-                + i * self.state.chunk_size * mpi.n_nodes
-            )
-
             O_i = nk.jax.jacobian(
                 self.state._apply_fun,
                 self.state.parameters,
@@ -223,9 +215,9 @@ class minSRVMC(VMC):
             O_i = O_i - O_avg
 
             if dense_update is None:
-                dense_update = mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon))[0]
+                dense_update = mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon[i]))[0]
             else:
-                dense_update += mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon))[0]
+                dense_update += mpi.mpi_sum_jax(O_i.conj().T.dot(OO_epsilon[i]))[0]
 
         # Convert back to pytree
         unravel = lambda x: x
