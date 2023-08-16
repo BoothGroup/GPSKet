@@ -124,7 +124,7 @@ class minSRVMC(VMC):
             idx_i = (
                 idx[i]
                 + mpi.node_number * self.state.chunk_size
-                + i * self.state.chunk_size * mpi.n_nodes
+                + i * self.state.chunk_size * (mpi.n_nodes - 1)
             )
             idx_i = (mpi4jax.gather(idx_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
                 -1
@@ -150,7 +150,7 @@ class minSRVMC(VMC):
                 idx_j = (
                     idx[j]
                     + mpi.node_number * self.state.chunk_size
-                    + i * self.state.chunk_size * mpi.n_nodes
+                    + j * self.state.chunk_size * (mpi.n_nodes - 1)
                 )
                 idx_j = (
                     mpi4jax.gather(idx_j, root=0, comm=mpi.MPI_jax_comm)[0]
