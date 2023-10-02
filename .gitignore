@@ -7,7 +7,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-netket_fidelity/_version.py
+GPSKet/_version.py
 .Python
 build/
 develop-eggs/
