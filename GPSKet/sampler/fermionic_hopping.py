@@ -32,7 +32,7 @@ def MetropolisHopping(
     hop_probability=1.0,
     transition_probs=None,
     **kwargs
-) -> MetropolisFastSampler:
+) -> MetropolisSampler:
     from .rules.fermionic_hopping import FermionicHoppingRule
 
     if transition_probs is not None:

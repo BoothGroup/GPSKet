@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_map
 from dataclasses import dataclass
 from typing import Callable, Optional
-from netket.jax.utils import is_scalar
+from netket.utils.numbers import is_scalar
 from netket.utils.types import PyTree, Scalar, ScalarOrSchedule
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner

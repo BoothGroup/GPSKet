@@ -1,13 +1,11 @@
 import netket as nk
 import netket.jax as nkjax
 import jax.numpy as jnp
-from typing import Tuple, Optional, Callable, Any
+from typing import Tuple, Optional, Callable, Literal, Any
 from collections import defaultdict
 import numpy as np
 
 from netket.utils.types import PyTree
-
-from netket.utils.dispatch import TrueT
 
 from netket.utils.mpi import (
     node_number as _rank,
@@ -129,7 +127,7 @@ class MCStateUniqueSamples(nk.vqs.MCState):
 def expect_and_grad(
     vstate: MCStateUniqueSamples,
     op: nk.operator.AbstractOperator,
-    use_covariance: TrueT,
+    use_covariance: Literal[True],
     chunk_size: Optional[int],
     *,
     mutable: Any
