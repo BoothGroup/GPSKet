@@ -11,7 +11,7 @@ dependencies = [
     "netket>3.5",
 ]
 authors=[
-    {name = "Yannick Rath"},
+    {name = "Yannic Rath"},
     {name = "Massimo Bortone"},
 ]
 version = "0.0.1"
