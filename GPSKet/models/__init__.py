@@ -21,3 +21,5 @@ from .backflow import Backflow
 from .backflow_jastrow import BackflowJastrow
 
 from .pixelcnn import PixelCNN
+
+from .segmented_qGPS import SegGPS
