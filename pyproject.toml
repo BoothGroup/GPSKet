@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.8.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "GPSKet"
+description="GPS plugin for NetKet introducing new models, optimizers and Fermionic functionality."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "netket>3.5",
+]
+authors=[
+    {name = "Yannic Rath"},
+    {name = "Massimo Bortone"},
+]
+version = "0.0.1"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6",
+    "pytest-cov>=2.10.1",
+    "black==23.7.0",
+    "ruff==0.0.287",
+]
+
+[tool.hatch.build]
+include = ["GPSKet*"]
+
+# Development tools
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.coverage.run]
+branch = true
+parallel = true
+command_line = "-m pytest --verbose tests"
+source = ["tests"]
+
+[tool.pytest.ini_options]
+addopts = "--color=yes --verbose --durations=100 --tb=short"
+doctest_optionflags = "NORMALIZE_WHITESPACE IGNORE_EXCEPTION_DETAIL NUMBER"
+filterwarnings = [
+    "ignore::UserWarning",
+    "ignore:No GPU/TPU found, falling back to CPU.:UserWarning",
+    "ignore:the imp module is deprecated in favour of importlib.*:DeprecationWarning",
+    "ignore:`np.long`",
+    "ignore:`np.int` is a deprecated alias for the builtin `int`",
+    "ignore::DeprecationWarning:tensorboardX",
+]
+testpaths = [
+    "tests",
+]
+
+[tool.ruff]
+target-version = "py39"
+select = ["E", "F", "W"]
+fixable = ["E", "F", "W"]
+ignore = ["E501", "E731", "E741"]
+#ignore = ["E266"]
+line-length = 88
+exclude = ["Examples/Legacy"]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["E402","F401"]
+"tutorials" = ["F401"]
