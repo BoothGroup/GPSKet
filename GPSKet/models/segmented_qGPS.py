@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 from typing import Optional
 from netket.utils.types import NNInitFunc, Array, DType
+from netket.hilbert import Spin
 from netket.hilbert.homogeneous import HomogeneousHilbert
 from GPSKet.nn.initializers import normal
 from GPSKet.hilbert import FermionicDiscreteHilbert
@@ -22,11 +23,26 @@ class SegGPS(nn.Module):
 
 
     def setup(self):
-        # TODO: extend this to work with spin models
-        assert isinstance(self.hilbert, FermionicDiscreteHilbert)
         self.L = self.hilbert.size
         self.local_dim = self.hilbert.local_size
-        self.max_up, self.max_dn = self.hilbert._n_elec
+        if isinstance(self.hilbert, FermionicDiscreteHilbert):
+            self.max_up, self.max_dn = self.hilbert._n_elec
+        elif isinstance(self.hilbert, Spin) and int(2*self.hilbert._s) == 1:
+            m = 2 * self.hilbert._total_sz
+            if self.L % 2 == 0:
+                L_half = int(self.L) // 2
+                self.max_up = L_half + m
+                self.max_dn = L_half - m
+            else:
+                L_half = int(self.L - m) // 2
+                if m > 0:
+                    self.max_up = L_half + m
+                    self.max_dn = L_half
+                else:
+                    self.max_up = L_half
+                    self.max_dn = L_half + m
+        else:
+            raise ValueError(f"SegGPS only works with fermionic or spin-1/2 Hilbert spaces for now, but this Hilbert space is of type {type(self.hilbert)}.")
 
     @nn.compact
     def __call__(self, inputs) -> Array:
