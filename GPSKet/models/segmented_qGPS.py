@@ -9,6 +9,49 @@ from GPSKet.nn.initializers import normal
 from GPSKet.hilbert import FermionicDiscreteHilbert
 
 
+@jax.jit
+def count_spins(indices):
+    """
+    Counts the number of up- and down-spins up to each site
+    in a batch of configurations, where:
+        - 0: down-spin
+        - 1: up-spin
+
+    Args:
+        - configs : batch of configurations (batch_size, L)
+
+    Returns:
+        - counts : number of up- and down-spins in configs (batch_size, 2, L)
+    """
+    n_up = jnp.cumsum(((indices[:, :-1] + 1) & 2) // 2, axis=-1)
+    n_dn = jnp.cumsum((indices[:, :-1] + 1) & 1, axis=-1)
+    counts = jnp.stack([n_up, n_dn], axis=1)
+    counts = jnp.pad(counts, ((0, 0), (0, 0), (1, 0)), mode='constant')
+    return counts
+
+@jax.jit
+def count_fermions(configs):
+    """
+    Counts the number of spin-up and spin-down electrons up to each orbital
+    in a batch of configurations in 2nd quantization representation where
+    occupation of the orbitals is described as:
+        - 0: unoccupied
+        - 1: singly-occupied with a spin-up electron
+        - 2: singly-occupied with a spin-down electron
+        - 3: doubly-occupied
+
+    Args:
+        - configs : batch of configurations (batch_size, L)
+
+    Returns:
+        - counts : number of spin-up and spin-down electrons in configs (batch_size, 2, L)
+    """
+    n_up = jnp.cumsum(configs[:, :-1] & 1, axis=-1)
+    n_dn = jnp.cumsum((configs[:, :-1] & 2) // 2, axis=-1)
+    counts = jnp.stack([n_up, n_dn], axis=1)
+    counts = jnp.pad(counts, ((0, 0), (0, 0), (1, 0)), mode='constant')
+    return counts
+
 class SegGPS(nn.Module):
     """
     Implements a GPS Ansatz inspired by segmented basis sets in Quantum Chemistry, where the amplitudes for
@@ -27,26 +70,28 @@ class SegGPS(nn.Module):
         self.local_dim = self.hilbert.local_size
         if isinstance(self.hilbert, FermionicDiscreteHilbert):
             self.max_up, self.max_dn = self.hilbert._n_elec
+            self._count_fn = count_fermions
         elif isinstance(self.hilbert, Spin) and int(2*self.hilbert._s) == 1:
-            m = 2 * self.hilbert._total_sz
             if self.L % 2 == 0:
+                l = int(self.hilbert._total_sz)
                 L_half = int(self.L) // 2
-                self.max_up = L_half + m
-                self.max_dn = L_half - m
+                self.max_up = L_half + l
+                self.max_dn = L_half - l
             else:
-                L_half = int(self.L - m) // 2
+                m = int(2 * self.hilbert._total_sz)
+                L_half = int(self.L - abs(m)) // 2
                 if m > 0:
                     self.max_up = L_half + m
                     self.max_dn = L_half
                 else:
                     self.max_up = L_half
-                    self.max_dn = L_half + m
+                    self.max_dn = L_half - m
+            self._count_fn = count_spins
         else:
-            raise ValueError(f"SegGPS only works with fermionic or spin-1/2 Hilbert spaces for now, but this Hilbert space is of type {type(self.hilbert)}.")
+            raise ValueError(f"Hilbert spaces of type {type(self.hilbert)} are not supported yet.")
 
     @nn.compact
     def __call__(self, inputs) -> Array:
-        # TODO: add support for fast updating
         indices = self.hilbert.states_to_local_indices(inputs)
 
         if self.init_fun is None:
@@ -60,11 +105,8 @@ class SegGPS(nn.Module):
             "epsilon", init, (self.local_dim, self.M, self.L, self.max_up+1, self.max_dn+1), self.dtype
         )
 
-        # Count up- and down-spin electrons up to each site (batch_size, local_dim, L)
-        n_up = jnp.cumsum(indices[:, :-1] & 1, axis=-1)
-        n_dn = jnp.cumsum((indices[:, :-1] & 2) // 2, axis=-1)
-        counts = jnp.stack([n_up, n_dn], axis=1)
-        counts = jnp.pad(counts, ((0, 0), (0, 0), (1, 0)), mode='constant')
+        # Count spin-up and spin-down particles up to each site
+        counts = self._count_fn(indices)
 
         # Evaluate site products
         def evaluate_site_product(sample, count):
