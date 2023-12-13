@@ -62,10 +62,9 @@ def _expect(
     samples: jnp.ndarray,
     local_value_args: PyTree,
 ) -> Stats:
-    samples_shape = samples.shape
-
-    if jnp.ndim(samples) != 2:
-        samples = samples.reshape((-1, samples_shape[-1]))
+    n_chains = samples.shape[0]
+    if samples.ndim >= 3:
+        samples = jax.lax.collapse(samples, 0, 2)
 
     def log_pdf(w, samples):
         return machine_pow * model_apply_fun({"params": w, **model_state}, samples).real
@@ -77,7 +76,7 @@ def _expect(
             {"params": parameters, **model_state},
             samples,
             local_value_args,
-            n_chains=samples_shape[0],
+            n_chains=n_chains,
         )
     else:
         _, op_stats = nkjax.expect(
@@ -86,6 +85,6 @@ def _expect(
             {"params": parameters, **model_state},
             samples,
             local_value_args,
-            n_chains=samples_shape[0],
+            n_chains=n_chains,
         )
     return op_stats

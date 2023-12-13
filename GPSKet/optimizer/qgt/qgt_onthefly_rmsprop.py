@@ -1,3 +1,4 @@
+import warnings
 import jax
 import jax.numpy as jnp
 import netket.jax as nkjax
@@ -12,6 +13,11 @@ from netket.jax import tree_conj
 from netket.optimizer import LinearOperator
 from netket.optimizer.linear_operator import Uninitialized
 from netket.optimizer.qgt.common import check_valid_vector_type
+from netket.errors import (
+    IllegalHolomorphicDeclarationForRealParametersError,
+    NonHolomorphicQGTOnTheFlyDenseRepresentationError,
+    HolomorphicUndeclaredWarning,
+)
 
 
 def mat_vec(jvp_fn, v, diag_shift, ema, eps):
@@ -53,6 +59,7 @@ def QGTOnTheFlyRMSProp(
     diag_shift=None,
     eps=None,
     chunk_size=None,
+    holomorphic: Optional[bool]=None,
     **kwargs,
 ) -> "QGTOnTheFlyRMSPropT":
     assert diag_shift >= 0.0 and diag_shift <= 1.0
@@ -83,12 +90,27 @@ def QGTOnTheFlyRMSProp(
         mv_factory = mat_vec_factory
         chunking = False
 
+    # check if holomorphic or not
+    if holomorphic:
+        if nkjax.tree_leaf_isreal(vstate.parameters):
+            raise IllegalHolomorphicDeclarationForRealParametersError()
+        else:
+            mode = "holomorphic"
+    else:
+        if not nkjax.tree_leaf_iscomplex(vstate.parameters):
+            mode = "real"
+        else:
+            if holomorphic is None:
+                warnings.warn(HolomorphicUndeclaredWarning(), UserWarning)
+            mode = "complex"
+
     mat_vec = mv_factory(
         forward_fn=vstate._apply_fun,
         params=vstate.parameters,
         model_state=vstate.model_state,
         samples=samples,
     )
+
     return QGTOnTheFlyRMSPropT(
         diag_shift=diag_shift,
         eps=eps,
@@ -96,6 +118,7 @@ def QGTOnTheFlyRMSProp(
         _mat_vec=mat_vec,
         _params=vstate.parameters,
         _chunking=chunking,
+        _mode=mode
     )
 
 
@@ -107,6 +130,7 @@ class QGTOnTheFlyRMSPropT(LinearOperator):
     _mat_vec: Callable[[PyTree, float], PyTree] = Uninitialized
     _params: PyTree = Uninitialized
     _chunking: bool = struct.field(pytree_node=False, default=False)
+    _mode: str = struct.field(pytree_node=False, default=None)
 
     def __matmul__(self, y):
         return onthefly_mat_treevec(self, y)
@@ -121,6 +145,8 @@ class QGTOnTheFlyRMSPropT(LinearOperator):
         Returns:
             A dense matrix representation of this S matrix.
         """
+        if self._mode == "complex":
+            raise NonHolomorphicQGTOnTheFlyDenseRepresentationError()
         return _to_dense(self)
 
     def __repr__(self):

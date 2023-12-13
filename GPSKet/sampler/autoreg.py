@@ -171,7 +171,7 @@ def _sample_chain(sampler, model, variables, state, chain_length):
         σ.shape[:-1]
     )  # (B, L)
 
-    σ = σ.reshape((chain_length, sampler.n_chains_per_rank, sampler.hilbert.size))
+    σ = σ.reshape((sampler.n_chains_per_rank, chain_length, sampler.hilbert.size))
 
     new_state = state.replace(key=new_key)
     return σ, new_state
