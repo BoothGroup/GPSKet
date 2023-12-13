@@ -36,7 +36,7 @@ def expect_chunked(
 
 
 @nk.vqs.expect.dispatch
-def expect(vstate: MCState, op: nk.operator.AbstractOperator) -> Stats:  # noqa: F811
+def expect(vstate: MCState, op: nk.operator.AbstractOperator, chunk_size: None) -> Stats:  # noqa: F811
     samples, args = get_local_kernel_arguments(vstate, op)
     local_estimator_fun = get_local_kernel(vstate, op)
     return _expect(
