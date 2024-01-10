@@ -49,11 +49,7 @@ def get_model(
         dtype = jnp.float64
     elif config.model.dtype == "complex":
         dtype = jnp.complex128
-    if isinstance(config.model.M, tuple):
-        assert len(config.model.M) == hilbert.size
-        M = HashableArray(np.array(config.M))
-    else:
-        M = int(config.model.M)
+    M = config.model.M
     init_fn = qk.nn.initializers.normal(sigma=config.model.sigma, dtype=dtype)
     if graph:
         groups = config.model.symmetries.split(",")
@@ -75,7 +71,11 @@ def get_model(
         )
     else:
         symmetries_fn, inv_symmetries_fn = qk.models.no_syms()
-    out_trafo = get_out_transformation(name, config.model.apply_exp)
+    if name == "GPS" or name == "FilterGPS":
+        axis = (-2, -1)
+    else:
+        axis = -1
+    out_trafo = lambda x: jnp.sum(x, axis=axis)
     if name != "GPS" and name != "FilterGPS":
         if isinstance(hilbert, nk.hilbert.Spin):
             count_spins_fn = count_spins
@@ -102,7 +102,6 @@ def get_model(
         )
     else:
         if "Filter" in name:
-            # TODO: add support for projective symmetrization of point-group and spin-flip symmetries
             args = [hilbert, M]
             if config.system_name == "Hubbard1d":
                 graph = nk.graph.Chain(config.system.Lx, pbc=config.system.pbc)
@@ -225,14 +224,14 @@ def count_spins(spins: Array) -> Array:
     """
     Count the number of up- and down-spins in a batch of local configurations x_i,
     where x_i can be equal to:
-        - 0 if it is occupied by an up-spin
-        - 1 if it is occupied by a down-spin
+        - 0 if it is occupied by an down-spin
+        - 1 if it is occupied by a up-spin
 
     Args:
         spins : array of local configurations (batch,)
 
     Returns:
-        the number of up- and down-spins for each configuration in the batch (batch, 2)
+        the number of down- and up-spins for each configuration in the batch (batch, 2)
     """
     return jnp.stack([(spins + 1) & 1, ((spins + 1) & 2) / 2], axis=-1).astype(
         jnp.int32
@@ -336,29 +335,6 @@ def renormalize_log_psi_fermionic(
         log_psi,
     )
     return log_psi
-
-
-def get_out_transformation(name: str, apply_exp: bool):
-    """
-    Return the transformation of the ouput layer
-
-    Args:
-        name : name of the Ansatz
-        apply_exp : whether to apply the exponential or not
-
-    Returns:
-        a callable function that is applied in the output layer of a GPS model
-    """
-    if name == "GPS" or name == "FilterGPS":
-        axis = (-2, -1)
-    else:
-        axis = -1
-    if apply_exp:
-        out_trafo = lambda x: jnp.sum(x, axis=axis)
-    else:
-        out_trafo = lambda x: jnp.log(jnp.sum(x, axis=axis) + 0.0j)
-    return out_trafo
-
 
 def get_plaquettes_and_masks(hilbert: HomogeneousHilbert, graph: AbstractGraph):
     """

@@ -29,7 +29,7 @@ def sheet(config):
     return config
 
 
-def get_config(options):
+def get_config(options="chain,canonical,real"):
     geometry, basis, dtype = options.split(",")
     if geometry not in ["chain", "sheet"]:
         raise ValueError(
@@ -43,6 +43,7 @@ def get_config(options):
         raise ValueError(
             f"{dtype} is not a valid config option: choose between `real` and `complex`."
         )
+    
 
     config = get_base_config()
 
@@ -63,11 +64,10 @@ def get_config(options):
 
     # Model
     config.model_name = "ARGPS"
-    config.model.M = "16"  # To allow int as well as tuples, set support dimension as string first and parse it later
+    config.model.M = 16
     config.model.dtype = dtype
     config.model.sigma = 0.1
     config.model.symmetries = "none"
-    config.model.apply_exp = True
 
     # Variational state
     config.variational_state.n_samples = 5000

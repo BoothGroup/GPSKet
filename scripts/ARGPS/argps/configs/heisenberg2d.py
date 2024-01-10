@@ -3,7 +3,7 @@ from argps.configs.common import get_config as get_base_config
 from argps.models import _MODELS
 
 
-def get_config(model):
+def get_config(model="ARGPS"):
     if model not in _MODELS.keys():
         models = ", ".join([f"`{model}`" for model in _MODELS.keys()])
         raise ValueError(
@@ -23,11 +23,16 @@ def get_config(model):
 
     # Model
     config.model_name = model
-    config.model.M = "1"  # To allow int as well as tuples, set support dimension as string first and parse it later
+    config.model.M = 1
     config.model.dtype = "real"
     config.model.sigma = 0.1
-    config.model.symmetries = "none"
-    config.model.apply_exp = True
+    # Symmetries can be set by specifying a comma-separated list of groups. Supported options are:
+    # - "none": no symmetries
+    # - "translations": only translational symmetries
+    # - "point-symmetries": only C4v symmetries
+    # - "spin-flip": only spin inversion symmetry (Z2)
+    # - "all": all possible lattice symmetries
+    config.model.symmetries = "none" # "point-symmetries,spin-flip"
 
     # Variational state
     config.variational_state.n_samples = 4096
@@ -50,7 +55,7 @@ def get_config(model):
     # Optimizer
     config.optimizer.learning_rate = 0.01
     config.optimizer.mode = "real"
-    config.optimizer.diag_shift = 0.01
+    config.optimizer.diag_shift = 0.1
     config.optimizer.decay = 0.9
     config.optimizer.eps = 1e-8
 

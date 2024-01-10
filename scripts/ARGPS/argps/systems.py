@@ -6,7 +6,10 @@ from netket.operator import AbstractOperator, Heisenberg
 from GPSKet.operator.hamiltonian import AbInitioHamiltonianOnTheFly
 from GPSKet.operator.hamiltonian import FermiHubbardOnTheFly
 from pyscf import scf, gto, ao2mo, lo
-from VMCutils import MPIVars
+from netket.utils.mpi import (
+    MPI_py_comm as _MPI_comm,
+    node_number as _rank,
+)
 
 
 def get_system(config: ConfigDict) -> AbstractOperator:
@@ -66,7 +69,7 @@ def get_molecular_system(config: ConfigDict) -> AbInitioHamiltonianOnTheFly:
         Hamiltonian for the molecular system
     """
     # Setup Hilbert space
-    if MPIVars.rank == 0:
+    if _rank == 0:
         mol = gto.Mole()
         molecule = config.get("molecule")
         mol.build(
@@ -85,13 +88,14 @@ def get_molecular_system(config: ConfigDict) -> AbInitioHamiltonianOnTheFly:
     else:
         norb = None
         nelec = None
-    norb = MPIVars.comm.bcast(norb, root=0)
-    nelec = MPIVars.comm.bcast(nelec, root=0)
+    if _MPI_comm:
+        norb = _MPI_comm.bcast(norb, root=0)
+        nelec = _MPI_comm.bcast(nelec, root=0)
 
     hi = qk.hilbert.FermionicDiscreteHilbert(N=norb, n_elec=(nelec // 2, nelec // 2))
 
     # Get hamiltonian elements
-    if MPIVars.rank == 0:
+    if _rank == 0:
         # 1-electron 'core' hamiltonian terms, transformed into MO basis
         h1 = np.linalg.multi_dot((myhf.mo_coeff.T, myhf.get_hcore(), myhf.mo_coeff))
 
@@ -118,8 +122,9 @@ def get_molecular_system(config: ConfigDict) -> AbInitioHamiltonianOnTheFly:
     else:
         h1 = None
         h2 = None
-    h1 = MPIVars.comm.bcast(h1, root=0)
-    h2 = MPIVars.comm.bcast(h2, root=0)
+    if _MPI_comm:
+        h1 = _MPI_comm.bcast(h1, root=0)
+        h2 = _MPI_comm.bcast(h2, root=0)
 
     # Setup Hamiltonian
     ha = AbInitioHamiltonianOnTheFly(hi, h1, h2)
@@ -141,7 +146,6 @@ def get_Hubbard_system(config: ConfigDict) -> FermiHubbardOnTheFly:
     t = config.t
     U = config.U
 
-    # TODO: add support for 2d system
     g = nk.graph.Chain(Lx, pbc=config.pbc)
     hi = qk.hilbert.FermionicDiscreteHilbert(
         g.n_nodes, n_elec=(g.n_nodes // 2, g.n_nodes // 2)

@@ -1,6 +1,9 @@
 import numpy as np
-from netket.utils.mpi import MPI_py_comm as MPI_comm, node_number as MPI_rank
 from ml_collections import ConfigDict
+from netket.utils.mpi import (
+    MPI_py_comm as _MPI_comm,
+    node_number as _rank,
+)
 
 
 def get_config() -> ConfigDict:
@@ -32,15 +35,13 @@ def get_config() -> ConfigDict:
 
 def resolve(config: ConfigDict) -> ConfigDict:
     # Set random seed
-    if MPI_rank == 0:
+    if _rank == 0:
         seed = np.random.randint(np.iinfo(np.uint32).max)
     else:
         seed = None
-    seed = MPI_comm.bcast(seed, root=0)
-    if (
-        config.variational_state_name != "FullSumState"
-        and config.variational_state.get("seed", None) is None
-    ):
+    if _MPI_comm:
+        seed = _MPI_comm.bcast(seed, root=0)
+    if config.variational_state.get("seed", None) is None:
         config.variational_state.seed = seed
 
     # Resolve molecular configuration
@@ -51,16 +52,6 @@ def resolve(config: ConfigDict) -> ConfigDict:
             # This makes the ConfigDict object serialisable.
             if callable(config.system.set_molecule):
                 config.system.set_molecule = config.system.set_molecule.__name__
-
-    # Support dimension can be int or tuple
-    if isinstance(config.model.M, str):
-        M = config.model.M.split(",")
-        if len(M) > 1:
-            M = tuple(map(int, M))
-        else:
-            M = int(M[0])
-        with config.ignore_type():
-            config.model.M = M
 
     config = config.copy_and_resolve_references()
     return config.lock()

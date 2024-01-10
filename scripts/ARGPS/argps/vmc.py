@@ -1,5 +1,6 @@
 import os
 import time
+import flax
 import jax
 import numpy as np
 import netket as nk
@@ -7,7 +8,7 @@ import GPSKet as qk
 from absl import app
 from absl import flags
 from absl import logging
-from netket.utils.mpi import node_number as MPI_rank
+from netket.utils.mpi import node_number as _MPI_rank
 from ml_collections import config_flags, ConfigDict
 from argps.configs.common import resolve
 from argps.systems import get_system
@@ -17,6 +18,8 @@ from argps.utils import save_config, read_config, CSVLogger, Timer
 from flax import serialization
 from flax.training.checkpoints import save_checkpoint, restore_checkpoint
 
+
+flax.config.update('flax_use_orbax_checkpointing', False)
 
 _CONFIG = config_flags.DEFINE_config_file(
     "config", None, "File path to a configuration file", lock_config=True
@@ -76,7 +79,7 @@ def main(argv):
     config = resolve(config)
 
     # Print and save config
-    if MPI_rank == 0:
+    if _MPI_rank == 0:
         logging.info(f"\n{config}")
         save_config(workdir, config)
 
@@ -117,16 +120,17 @@ def main(argv):
     vmc = restore_checkpoint(checkpoints_dir, vmc)
     initial_step = vmc.step_count + 1
     step = initial_step
-    if MPI_rank == 0:
-        logging.info("Will start/continue training at initial_step=%d", initial_step)
+    if _MPI_rank == 0:
+        logging.info(f"Will start/continue training at initial_step={initial_step}")
 
     # Logger
-    if MPI_rank == 0:
+    if _MPI_rank == 0:
         fieldnames = list(nk.stats.Stats().to_dict().keys()) + ["Runtime"]
         logger = CSVLogger(os.path.join(workdir, "metrics.csv"), fieldnames)
 
     # Run optimization loop
-    if MPI_rank == 0:
+    if _MPI_rank == 0:
+        logging.info(f"Model has {vs.n_parameters} parameters")
         logging.info("Starting training loop; initial compile can take a while...")
         timer = Timer(config.max_steps)
         t0 = time.time()
@@ -135,20 +139,20 @@ def main(argv):
         vmc.advance()
 
         # Report compilation time
-        if MPI_rank == 0 and step == initial_step:
+        if _MPI_rank == 0 and step == initial_step:
             logging.info(f"First step took {time.time() - t0:.1f} seconds.")
 
         # Update timer
-        if MPI_rank == 0:
+        if _MPI_rank == 0:
             timer.update(step)
 
         # Log data
-        if MPI_rank == 0:
+        if _MPI_rank == 0:
             logger(step, {**vmc.energy.to_dict(), "Runtime": timer.runtime})
 
         # Report training metrics
         if (
-            MPI_rank == 0
+            _MPI_rank == 0
             and config.progress_every
             and step % config.progress_every == 0
         ):
@@ -163,7 +167,7 @@ def main(argv):
             )
 
         # Store checkpoint
-        if MPI_rank == 0 and (
+        if _MPI_rank == 0 and (
             (config.checkpoint_every and step % config.checkpoint_every == 0)
             or step == config.max_steps
         ):
