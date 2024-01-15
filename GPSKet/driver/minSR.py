@@ -6,7 +6,6 @@ import jax.numpy as jnp
 from functools import partial
 
 import netket as nk
-import mpi4jax
 from netket import VMC
 from netket.stats import Stats
 from netket.utils import mpi
@@ -106,18 +105,16 @@ class minSRVMC(VMC):
                 O_i = O_i[:, 0, :] + 1.0j * O_i[:, 1, :]
 
             if loss_grad is None:
-                loss_grad = mpi.mpi_sum_jax(jnp.dot(O_i.T, loc_ens_centered[i]))[0]
+                loss_grad, token = mpi.mpi_sum_jax(jnp.dot(O_i.T, loc_ens_centered[i]))
             else:
-                loss_grad += mpi.mpi_sum_jax(jnp.dot(O_i.T, loc_ens_centered[i]))[0]
+                _loss_grad, token = mpi.mpi_sum_jax(jnp.dot(O_i.T, loc_ens_centered[i]), token=token)
+                loss_grad += _loss_grad
 
             if O_avg is None:
-                O_avg = mpi.mpi_sum_jax(np.sum(O_i * counts_i[:, np.newaxis], axis=0))[
-                    0
-                ]
+                O_avg, token = mpi.mpi_sum_jax(np.sum(O_i * counts_i[:, np.newaxis], axis=0), token=token)
             else:
-                O_avg += mpi.mpi_sum_jax(np.sum(O_i * counts_i[:, np.newaxis], axis=0))[
-                    0
-                ]
+                _O_avg, token = mpi.mpi_sum_jax(np.sum(O_i * counts_i[:, np.newaxis], axis=0), token=token)
+                O_avg += _O_avg
 
         # Compute neural tangent kernel
         for i in range(n_chunks):
@@ -126,9 +123,8 @@ class minSRVMC(VMC):
                 + mpi.node_number * self.state.chunk_size
                 + i * self.state.chunk_size * (mpi.n_nodes - 1)
             )
-            idx_i = (mpi4jax.gather(idx_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
-                -1
-            )
+            idx_i, token = mpi.mpi_gather_jax(idx_i, token=token)
+            idx_i = idx_i.reshape(-1)
             O_i = nk.jax.jacobian(
                 self.state._apply_fun,
                 self.state.parameters,
@@ -139,9 +135,8 @@ class minSRVMC(VMC):
                 dense=True,
                 center=False,
             )
-            O_i = (mpi4jax.gather(O_i, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
-                (-1, *O_i.shape[1:])
-            )
+            O_i, token = mpi.mpi_gather_jax(O_i, token=token)
+            O_i = O_i.reshape((-1, *O_i.shape[2:]))
             if mpi.rank == 0:
                 if len(O_i.shape) == 3:
                     O_i = O_i[:, 0, :] + 1.0j * O_i[:, 1, :]
@@ -152,9 +147,8 @@ class minSRVMC(VMC):
                     + mpi.node_number * self.state.chunk_size
                     + j * self.state.chunk_size * (mpi.n_nodes - 1)
                 )
-                idx_j = (
-                    mpi4jax.gather(idx_j, root=0, comm=mpi.MPI_jax_comm)[0]
-                ).reshape(-1)
+                idx_j, token = mpi.mpi_gather_jax(idx_j, token=token)
+                idx_j = idx_j.reshape(-1)
                 O_j = nk.jax.jacobian(
                     self.state._apply_fun,
                     self.state.parameters,
@@ -165,9 +159,8 @@ class minSRVMC(VMC):
                     dense=True,
                     center=False,
                 )
-                O_j = (mpi4jax.gather(O_j, root=0, comm=mpi.MPI_jax_comm)[0]).reshape(
-                    (-1, *O_j.shape[1:])
-                )
+                O_j, token = mpi.mpi_gather_jax(O_j, token=token)
+                O_j = O_j.reshape((-1, *O_j.shape[2:]))
                 if mpi.rank == 0:
                     if len(O_j.shape) == 3:
                         O_j = O_j[:, 0, :] + 1.0j * O_j[:, 1, :]
@@ -176,9 +169,7 @@ class minSRVMC(VMC):
                     OO = OO.at[ii, jj].set(O_i.dot(O_j.conj().T))
 
         # Solve linear system and compute parameters update
-        loc_ens_centered_restacked = mpi4jax.gather(
-            loc_ens_centered, root=0, comm=mpi.MPI_jax_comm
-        )[0]
+        loc_ens_centered_restacked, token = mpi.mpi_gather_jax(loc_ens_centered, token=token)
 
         if mpi.rank == 0:
             loc_ens_centered_restacked = jnp.swapaxes(loc_ens_centered_restacked, 0, 1)
@@ -195,7 +186,7 @@ class minSRVMC(VMC):
                 (n_chunks, self.state.chunk_size), dtype=jnp.complex128
             )
 
-        OO_epsilon = mpi4jax.scatter(OO_epsilon, root=0, comm=mpi.MPI_jax_comm)[0]
+        OO_epsilon, token = mpi.mpi_scatter_jax(OO_epsilon, token=token)
 
         for i in range(n_chunks):
             O_i = nk.jax.jacobian(
