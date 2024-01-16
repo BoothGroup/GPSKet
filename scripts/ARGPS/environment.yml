@@ -1,0 +1,12 @@
+name: argps
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.10
+  - netket==3.10.2
+  - pyscf
+  - ml-collections
+  - pip
+  - pip:
+    - git+https://github.com/BoothGroup/GPSKet.git#egg=GPSKet

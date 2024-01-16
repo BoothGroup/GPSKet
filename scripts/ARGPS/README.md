@@ -1,5 +1,5 @@
 # Scripts for AutoRegressive GPS (ARGPS)
-This folder contains the code to generate the data presented in our upcoming manuscript [*"Impact of conditional modelling for universal autoregressive quantum states"*](https://arxiv.org/abs/2306.05917) by Massimo Bortone, Yannic Rath and George H. Booth.
+This folder contains the code to generate the data presented in our upcoming manuscript [*"Impact of conditional modelling for a universal autoregressive quantum state"*](https://arxiv.org/abs/2306.05917) by Massimo Bortone, Yannic Rath and George H. Booth.
 
 ## Organization
 The code is structured as follows:
@@ -14,15 +14,24 @@ The configuration files are:
 - [hubbard1d.py](argps/configs/hubbard1d.py): configurations for VMC on a 1D Hubbard system in second quantization with `ARFilterGPS`
 - [hydrogen.py](argps/configs/hydrogen.py): configurations for VMC on an ab-initio Hamiltonian in second quantization for molecular hydrogen; accepts geometry (`chain` or `sheet`), basis (`canonical` or `local`) and dtype (`real` or `complex`) as options (default: `chain,canonical,real`).
 
-## Requirements
+## Installation
+
+### Requirements
 To run the code make sure the following packages are installed:
-- [NetKet](https://github.com/netket/netket): quantum many-body machine learning framework written in [JAX](https://github.com/google/jax) (install with `MPI` support)
+- [NetKet](https://github.com/netket/netket): quantum many-body machine learning framework written in [JAX](https://github.com/google/jax)
 - [GPSKet](https://github.com/BoothGroup/GPSKet): NetKet plugin for the family of GPS models
 - [pyscf](https://github.com/pyscf/pyscf): Python module for quantum chemistry
 - [ml_collections](https://github.com/google/ml_collections): configuration file data structures
 
-## Installation
+### Conda
 
+We provide a `conda` environment file that installs the necessary dependencies to reproduce the calculations in the paper.
+To create the environment and install the packages run the following command from the `scripts/ARGPS` folder:
+```
+conda env create -f environment.yml
+```
+
+### Manual
 Install `GPSKet`
 ```
 pip install --upgrade pip
