@@ -20,6 +20,8 @@ from .backflow import Backflow
 
 from .backflow_jastrow import BackflowJastrow
 
+from .cpd_backflow import CPDBackflow
+
 from .pixelcnn import PixelCNN
 
 from .segmented_qGPS import SegGPS
