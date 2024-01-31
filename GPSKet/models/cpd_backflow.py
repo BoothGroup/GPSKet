@@ -29,7 +29,12 @@ def CPD_single_orbital(epsilon_a: Array, n_b: Array) -> Array:
     return  o
 
 def CPD(epsilon, n_b):
-    return jax.vmap(CPD_single_orbital, in_axes=(0, 0))(epsilon, n_b)
+    if len(n_b.shape) == 2:
+        # Environments matrix is not None
+        in_axes = (0, 0)
+    else:
+        in_axes = (0, None)
+    return jax.vmap(CPD_single_orbital, in_axes=in_axes)(epsilon, n_b)
 
 CPD_batched = jax.vmap(CPD, in_axes=(None, 0))
 
@@ -81,13 +86,7 @@ class CPDBackflow(nn.Module):
             init_fun = normal(dtype=self.dtype)
         else:
             init_fun = self.init_fun
-        if self.environments is None:
-            K = shape[0] # number of other orbitals in the environment of each
-            all_to_all = np.tile(np.arange(K), (K, 1))
-            self._environments = self.variable(
-                "orbitals", "environments", lambda: all_to_all
-            )
-        else:
+        if self.environments is not None:
             self._environments = self.variable(
                 "orbitals", "environments", lambda: jnp.array(self.environments)
             )
@@ -95,18 +94,20 @@ class CPDBackflow(nn.Module):
 
     @nn.compact
     def __call__(self, n) -> Array:
+        # TODO: Add support for fast-updating
         # Convert 2nd quantized configurations to orbital indices
         R = occupancies_to_electrons(n, self._n_elec) # (B, N)
         R = jnp.expand_dims(R, axis=-1)
 
-        # Take only occupations of orbitals in environment if necessary
-        # NOTE: to reduce the number of parameters and speed-up calculations, users need to define an environment matrix of shape (L, K),
-        # where for each orbital α the corresponding row holds the indices of orbitals β in its environment
-        n = jnp.take_along_axis(
-            jnp.expand_dims(n, 2),
-            jnp.expand_dims(self._environments.value, 0),
-            axis=1
-        ) # (B, L, K)
+        # If an environments matrix is defined, then take only occupations of orbitals in environment of each.
+        # This matrix needs to be of shape (L, K), with the α-th row corresponding to the K indices of orbitals
+        # β in the environment of orbital α
+        if self.environments is not None:
+            n = jnp.take_along_axis(
+                jnp.expand_dims(n, 2),
+                jnp.expand_dims(self._environments.value, 0),
+                axis=1
+            ) # (B, L, K)
 
         # Compute orbitals and log-determinant
         orbitals = CPD_batched(self._epsilon, n) # (B, L, N)
