@@ -71,7 +71,7 @@ loc_coeff = np.concatenate((loc_coeff_occ, loc_coeff_vrt), axis=1)
 ovlp = myhf.get_ovlp()
 # Check that we still have an orthonormal basis, i.e. C^T S C should be the identity
 assert np.allclose(np.linalg.multi_dot((loc_coeff.T, ovlp, loc_coeff)), np.eye(norb))
-# Find the hamiltonian in the local basis
+# Find the hamiltonian in the split-local basis
 hij_local = np.linalg.multi_dot((loc_coeff.T, myhf.get_hcore(), loc_coeff))
 hijkl_local = ao2mo.restore(1, ao2mo.kernel(mol, loc_coeff), norb)
 h1 = hij_local
