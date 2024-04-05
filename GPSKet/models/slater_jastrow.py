@@ -3,7 +3,6 @@ import jax.numpy as jnp
 from jax.nn.initializers import normal
 from flax import linen as nn
 from typing import Union, Tuple
-from netket.models import Jastrow
 from netket.utils.types import Array, DType, NNInitFunc, Callable
 from .slater import Slater
 from .jastrow import Jastrow
