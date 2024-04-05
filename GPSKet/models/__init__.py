@@ -16,6 +16,8 @@ from .slater import Slater, occupancies_to_electrons
 
 from .slater_jastrow import SlaterJastrow
 
+from .slater_qGPS import SlaterqGPS
+
 from .backflow import Backflow
 
 from .backflow_jastrow import BackflowJastrow
