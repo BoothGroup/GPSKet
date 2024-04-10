@@ -1,9 +1,7 @@
 # enable x64 on jax
 # must be done at 0 startup.
-from jax.config import config
-
-config.update("jax_enable_x64", True)
-del config
+import jax
+jax.config.update("jax_enable_x64", True)
 
 __all__ = [
     "models",
