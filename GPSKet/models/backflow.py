@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import flax.linen as nn
+from typing import Optional
 from jax.scipy.special import logsumexp
 from netket.utils import HashableArray
 from netket.utils.types import Array, Callable
@@ -16,10 +17,10 @@ class Backflow(nn.Module):
 
     hilbert: FermionicDiscreteHilbert
     """The Hilbert space of the wavefunction model"""
-    orbitals: HashableArray
-    """Mean-field single-particle orbitals, e.g. Hartree-Fock"""
     correction_fun: nn.Module
     """Module that computes the correction to the initial orbitals"""
+    orbitals: Optional[HashableArray] = None
+    """Mean-field single-particle orbitals, e.g. Hartree-Fock"""
     apply_symmetries: Callable = lambda inputs: jnp.expand_dims(inputs, axis=-1)
     """Function to apply symmetries to configurations"""
     apply_fast_update: bool = True
@@ -33,10 +34,10 @@ class Backflow(nn.Module):
     def __call__(self, x, cache_intermediates=False, update_sites=None) -> Array:
         norb = self.hilbert.size
         nelec = self.hilbert._n_elec
-        # TODO: improve performance by scanning over symmetries
-        orbitals = self.variable(
-            "orbitals", "mean_field", lambda: jnp.array(self.orbitals)
-        )  # (L, N)
+        if self.orbitals is not None:
+            orbitals = self.variable(
+                "orbitals", "mean_field", lambda: jnp.array(self.orbitals)
+            )  # (L, N)
         corrections = self.correction_fun(
             x, cache_intermediates=cache_intermediates, update_sites=update_sites
         )  # (B, L, N, T)
@@ -70,46 +71,57 @@ class Backflow(nn.Module):
         if self.fixed_magnetization:
             y_up, y_dn = jnp.split(y, np.array([nelec[0]]), axis=1)
             if self.spin_symmetry_by_structure:
-                ɸ_up = jnp.take_along_axis(
-                    jnp.expand_dims(orbitals.value, axis=(0, -1)), y_up, axis=1
-                )
-                ɸ_dn = jnp.take_along_axis(
-                    jnp.expand_dims(orbitals.value, axis=(0, -1)), y_dn, axis=1
-                )
+                if self.orbitals is not None:
+                    ɸ_up = jnp.take_along_axis(
+                        jnp.expand_dims(orbitals.value, axis=(0, -1)), y_up, axis=1
+                    )
+                    ɸ_dn = jnp.take_along_axis(
+                        jnp.expand_dims(orbitals.value, axis=(0, -1)), y_dn, axis=1
+                    )
                 Δ_up = jnp.take_along_axis(corrections, y_up, axis=1)
                 Δ_dn = jnp.take_along_axis(corrections, y_dn, axis=1)
             else:
-                ɸ_up = jnp.take_along_axis(
-                    jnp.expand_dims(orbitals.value[:, : nelec[0]], axis=(0, -1)),
-                    y_up,
-                    axis=1,
-                )
-                ɸ_dn = jnp.take_along_axis(
-                    jnp.expand_dims(orbitals.value[:, nelec[0] :], axis=(0, -1)),
-                    y_dn,
-                    axis=1,
-                )
+                if self.orbitals is not None:
+                    ɸ_up = jnp.take_along_axis(
+                        jnp.expand_dims(orbitals.value[:, : nelec[0]], axis=(0, -1)),
+                        y_up,
+                        axis=1,
+                    )
+                    ɸ_dn = jnp.take_along_axis(
+                        jnp.expand_dims(orbitals.value[:, nelec[0] :], axis=(0, -1)),
+                        y_dn,
+                        axis=1,
+                    )
                 Δ_up = jnp.take_along_axis(
                     corrections[:, :, : nelec[0], :], y_up, axis=1
                 )
                 Δ_dn = jnp.take_along_axis(
                     corrections[:, :, nelec[0] :, :], y_dn, axis=1
                 )
-            ɸ_up = jnp.transpose(ɸ_up, (0, 3, 1, 2))  # (B, T, N, N)
-            ɸ_dn = jnp.transpose(ɸ_dn, (0, 3, 1, 2))  # (B, T, N, N)
+            if self.orbitals is not None:
+                ɸ_up = jnp.transpose(ɸ_up, (0, 3, 1, 2))  # (B, T, N, N)
+                ɸ_dn = jnp.transpose(ɸ_dn, (0, 3, 1, 2))  # (B, T, N, N)
             Δ_up = jnp.transpose(Δ_up, (0, 3, 1, 2))  # (B, T, N, N)
             Δ_dn = jnp.transpose(Δ_dn, (0, 3, 1, 2))  # (B, T, N, N)
-            (s_up, log_det_up) = jnp.linalg.slogdet(ɸ_up + Δ_up)
-            (s_dn, log_det_dn) = jnp.linalg.slogdet(ɸ_dn + Δ_dn)
+            if self.orbitals is not None:
+                (s_up, log_det_up) = jnp.linalg.slogdet(ɸ_up + Δ_up)
+                (s_dn, log_det_dn) = jnp.linalg.slogdet(ɸ_dn + Δ_dn)
+            else:
+                (s_up, log_det_up) = jnp.linalg.slogdet(Δ_up)
+                (s_dn, log_det_dn) = jnp.linalg.slogdet(Δ_dn)
             log_det = log_det_up + log_det_dn + jnp.log(s_up * s_dn + 0j)  # (B, T)
         else:
             y = y.at[:, nelec[0] :, :].add(norb)
-            ɸ = jnp.take_along_axis(
-                jnp.expand_dims(orbitals.value, axis=(0, -1)), y, axis=1
-            )
+            if self.orbitals is not None:
+                ɸ = jnp.take_along_axis(
+                    jnp.expand_dims(orbitals.value, axis=(0, -1)), y, axis=1
+                )
+                ɸ = jnp.transpose(ɸ, (0, 3, 1, 2))  # (B, T, N, N)
             Δ = jnp.take_along_axis(corrections, y, axis=1)
-            ɸ = jnp.transpose(ɸ, (0, 3, 1, 2))  # (B, T, N, N)
             Δ = jnp.transpose(Δ, (0, 3, 1, 2))  # (B, T, N, N)
-            (s, log_det) = jnp.linalg.slogdet(ɸ + Δ)
+            if self.orbitals is not None:
+                (s, log_det) = jnp.linalg.slogdet(ɸ + Δ)
+            else:
+                (s, log_det) = jnp.linalg.slogdet(Δ)
             log_det = log_det + jnp.log(s + 0j)  # (B, T)
         return logsumexp(log_det, axis=-1)
