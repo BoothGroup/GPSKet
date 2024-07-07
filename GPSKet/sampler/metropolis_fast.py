@@ -88,14 +88,14 @@ class MetropolisFastSampler(MetropolisSampler):
             "log_prob": sampler.machine_pow * value.real,
             "accepted": state.n_accepted_proc,
         }
-        s = jax.lax.fori_loop(0, sampler.n_sweeps, loop_body, init_s)
+        s = jax.lax.fori_loop(0, sampler.sweep_size, loop_body, init_s)
 
         new_state = state.replace(
             rng=new_rng,
             σ=s["σ"],
             n_accepted_proc=s["accepted"],
             n_steps_proc=state.n_steps_proc
-            + sampler.n_sweeps * sampler.n_chains_per_rank,
+            + sampler.sweep_size * sampler.n_chains_per_rank,
         )
 
         return new_state, new_state.σ
