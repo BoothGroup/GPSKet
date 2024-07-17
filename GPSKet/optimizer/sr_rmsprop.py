@@ -1,17 +1,23 @@
 import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
-from dataclasses import dataclass
 from typing import Callable, Optional
 from netket.utils.numbers import is_scalar
 from netket.utils.types import PyTree, Scalar, ScalarOrSchedule
+from netket.utils import struct
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner
 from .qgt import QGTJacobianDenseRMSProp
 
 
-@dataclass
-class SRRMSProp(AbstractLinearPreconditioner):
+class SRRMSProp(AbstractLinearPreconditioner, mutable=True):
+    diag_shift: ScalarOrSchedule = struct.field(serialize=False, default=0.01)
+    decay: Scalar = struct.field(serialize=False, default=0.9)
+    eps: Scalar = struct.field(serialize=False, default=1e-8)
+    qgt_constructor: Callable = struct.static_field(default=None)
+    qgt_kwargs: dict = struct.field(serialize=False, default=None)
+    _ema: PyTree = struct.field(serialize=True)
+
     def __init__(
         self,
         params_structure: PyTree,
