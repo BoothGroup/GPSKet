@@ -12,11 +12,12 @@ import netket as nk
 
 from netket.hilbert.custom_hilbert import HomogeneousHilbert
 
+from netket.utils import StaticRange
+
 
 class FermionicDiscreteHilbert(HomogeneousHilbert):
     def __init__(self, N: int = 1, n_elec: Optional[Tuple[int, int]] = None):
-        local_states = np.arange(4, dtype=np.uint8)
-        local_states = local_states.tolist()
+        local_states = StaticRange(0, 1, 4, dtype=np.uint8)
 
         if n_elec is not None:
 

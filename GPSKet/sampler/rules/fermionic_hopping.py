@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from flax import struct
 from netket.sampler.metropolis import MetropolisRule
 from typing import Optional
 from netket.utils.types import Array
@@ -23,7 +22,7 @@ def transition_function(
         )
         start_site = jax.random.choice(keyA, samp.shape[-1], p=occ_prob)
         spin_probs = jnp.array([is_occ_up[start_site], is_occ_down[start_site]])
-        spin = jax.random.choice(keyB, 2, p=spin_probs) + 1
+        spin = jax.random.choice(keyB, jnp.arange(0, 2, 1, samp.dtype), p=spin_probs) + 1
         target_site_probs = jnp.where(
             hopping_or_exchange == 0,
             ~((samp & spin).astype(bool)),
@@ -83,8 +82,6 @@ transition_fun_without_update = (
     )
 )
 
-
-@struct.dataclass
 class FermionicHoppingRule(MetropolisRule):
     """
     Fermionic hopping update rule
@@ -93,13 +90,15 @@ class FermionicHoppingRule(MetropolisRule):
     hop_probability: float = 1.0
     transition_probs: Optional[Array] = None
 
+    def __init__(self, hop_probability: float = 1.0, transition_probs: Optional[Array] = None) -> None:
+        self.hop_probability = hop_probability
+        self.transition_probs = transition_probs
+
     def transition(rule, sampler, machine, parameters, state, key, sample):
         return transition_fun_without_update(
             key, sample, rule.hop_probability, transition_probs=rule.transition_probs
         )
 
-
-@struct.dataclass
 class FermionicHoppingRuleWithUpdates(MetropolisRule):
     """
     Fermionic hopping update rule which also returns the list of affected sites
@@ -108,6 +107,10 @@ class FermionicHoppingRuleWithUpdates(MetropolisRule):
 
     hop_probability: float = 1.0
     transition_probs: Optional[Array] = None
+
+    def __init__(self, hop_probability: float = 1.0, transition_probs: Optional[Array] = None) -> None:
+        self.hop_probability = hop_probability
+        self.transition_probs = transition_probs
 
     def transition(rule, sampler, machine, parameters, state, key, sample):
         return transition_fun_with_update(

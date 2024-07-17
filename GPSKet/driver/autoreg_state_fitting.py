@@ -6,7 +6,6 @@ from typing import Tuple, Optional
 from netket.utils.types import Array, SeedT
 from netket.operator import AbstractOperator
 from netket.utils import mpi
-from netket.driver.vmc_common import info
 from .abstract_state_fitting import AbstractStateFittingDriver
 
 
@@ -74,17 +73,6 @@ class ARStateFitting(AbstractStateFittingDriver):
             + f"\n  step_count = {self.step_count},"
             + f"\n  state = {self.state})"
         )
-
-    def info(self, depth=0):
-        lines = [
-            "{}: {}".format(name, info(obj, depth=depth + 1))
-            for name, obj in [
-                ("Hamiltonian    ", self._ham),
-                ("Optimizer      ", self._optimizer),
-                ("State          ", self.state),
-            ]
-        ]
-        return "\n{}".format(" " * 3 * (depth + 1)).join([str(self)] + lines)
 
 
 @partial(jax.jit, static_argnums=2)
