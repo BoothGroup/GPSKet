@@ -1,0 +1,12 @@
+name: cpd-backflow
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - netket[mpi]
+    - pyscf==2.5.0
+    - ml-collections
+    - git+https://github.com/BoothGroup/GPSKet.git#egg=GPSKet
