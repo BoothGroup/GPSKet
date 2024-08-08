@@ -1,29 +1,32 @@
-from typing import Optional, Tuple
-
-from numba import jit
-
-import numpy as np
-
 import jax
-
 import jax.numpy as jnp
-
-import netket as nk
-
+import numpy as np
+from typing import Optional, Tuple
 from netket.hilbert.custom_hilbert import HomogeneousHilbert
+from netket.utils import struct, StaticRange
+from netket.utils.types import Scalar, Array
 
-from netket.utils import StaticRange
 
+@struct.dataclass
+class SumConstraint:
+
+    n_elec: Tuple[Scalar, Scalar] = struct.field(pytree_node=False)
+
+    @jax.jit
+    def __call__(self, x: Array) -> Array:
+        n_up = jnp.where(x == 3, True, False)
+        n_dn = jnp.array(n_up)
+        n_up = jnp.where(x == 1, True, n_up)
+        n_dn = jnp.where(x == 2, True, n_dn)
+        result = jnp.logical_and(n_up.sum(axis=1) == self.n_elec[0], n_dn.sum(axis=1) == self.n_elec[1])
+        return result
 
 class FermionicDiscreteHilbert(HomogeneousHilbert):
     def __init__(self, N: int = 1, n_elec: Optional[Tuple[int, int]] = None):
         local_states = StaticRange(0, 1, 4, dtype=np.uint8)
 
         if n_elec is not None:
-
-            def constraints(x):
-                return self._sum_constraint(x, n_elec)
-
+            constraints = SumConstraint(n_elec)
         else:
             constraints = None
 
@@ -31,26 +34,6 @@ class FermionicDiscreteHilbert(HomogeneousHilbert):
         self._local_size = 4
 
         super().__init__(local_states, N, constraints)
-
-        from .random import discrete_fermion
-
-    @staticmethod
-    @jit(nopython=True)
-    def _sum_constraint(x, n_elec):
-        result = np.ones(x.shape[0])
-        for i in range(x.shape[0]):
-            n_up = 0
-            n_down = 0
-            for j in range(x.shape[1]):
-                if x[i, j] == 1.0 or x[i, j] == 3.0:
-                    n_up += 1
-                if x[i, j] == 2.0 or x[i, j] == 3.0:
-                    n_down += 1
-            if n_up == n_elec[0] and n_down == n_elec[1]:
-                result[i] = 1
-            else:
-                result[i] = 0
-        return result == 1.0
 
     def __pow__(self, n):
         if self._n_elec is None:
