@@ -35,6 +35,8 @@ class FermionicDiscreteHilbert(HomogeneousHilbert):
 
         super().__init__(local_states, N, constraints)
 
+        from .random import discrete_fermion
+
     def __pow__(self, n):
         if self._n_elec is None:
             n_elec = None
