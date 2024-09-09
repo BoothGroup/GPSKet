@@ -1,6 +1,5 @@
 import netket as nk
 from netket.optimizer.qgt.qgt_jacobian_common import (
-    sanitize_diag_shift,
     to_shift_offset,
     rescale,
 )
