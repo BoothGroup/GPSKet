@@ -87,7 +87,7 @@ def QGTJacobianDenseRMSProp(
         center=True,
     )
 
-    pars_struct = jax.tree_map(
+    pars_struct = jax.tree_util.tree_map(
         lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), vstate.parameters
     )
     return QGTJacobianDenseRMSPropT(

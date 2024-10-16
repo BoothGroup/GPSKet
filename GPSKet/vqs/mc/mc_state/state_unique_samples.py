@@ -240,7 +240,7 @@ def grad_expect_hermitian_chunked(
 
         val_grad = vjp_fun((jnp.conjugate(loc_vals_centered)))[0]
 
-        val_grad = jax.tree_map(
+        val_grad = jax.tree_util.tree_map(
             lambda x, target: (x if jnp.iscomplexobj(target) else 2 * x.real).astype(
                 target.dtype
             ),
@@ -248,6 +248,6 @@ def grad_expect_hermitian_chunked(
             parameters,
         )
 
-        return loc_val_stats, jax.tree_map(lambda x: _mpi_sum_jax(x)[0], val_grad)
+        return loc_val_stats, jax.tree_util.tree_map(lambda x: _mpi_sum_jax(x)[0], val_grad)
     else:
         return loc_val_stats

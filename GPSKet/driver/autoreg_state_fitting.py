@@ -91,5 +91,5 @@ def _loss_and_grad(params, model_state, logpsi, mini_batch):
     )
     loss, _ = mpi.mpi_mean_jax(loss)
     grad = jax.tree_util.tree_map(lambda p: mpi.mpi_sum_jax(p)[0], grad)
-    grad = jax.tree_map(jnp.conj, grad)
+    grad = jax.tree_util.tree_map(jnp.conj, grad)
     return loss, grad

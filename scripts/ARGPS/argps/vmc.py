@@ -99,7 +99,7 @@ def main(argv):
 
     # Optimizer
     op = nk.optimizer.Sgd(learning_rate=config.optimizer.learning_rate)
-    pars_struct = jax.tree_map(
+    pars_struct = jax.tree_util.tree_map(
         lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), vs.parameters
     )
     sr = qk.optimizer.SRRMSProp(

@@ -223,7 +223,7 @@ class minSRVMC(VMC):
         self._loss_grad = reassemble(unravel(loss_grad))
 
         # Cast to real if necessary
-        self._dp = jax.tree_map(
+        self._dp = jax.tree_util.tree_map(
             lambda x, target: (x if jnp.iscomplexobj(target) else x.real),
             self._dp,
             self.state.parameters,

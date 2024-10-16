@@ -65,7 +65,7 @@ class MetropolisFastSampler(MetropolisSampler):
             def update(old_state, new_state):
                 return jax.vmap(jnp.where)(do_accept, old_state, new_state)
 
-            s["intermediates_cache"] = jax.tree_map(
+            s["intermediates_cache"] = jax.tree_util.tree_map(
                 update, new_intermediates_cache, s["intermediates_cache"]
             )
 

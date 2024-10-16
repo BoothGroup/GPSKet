@@ -63,7 +63,7 @@ def main(argv):
 
     # Load best parameters
     best_params = restore_best_params(workdir)['Parameters']
-    best_params = jax.tree_map(lambda x: jnp.array(x, x.dtype), best_params)
+    best_params = jax.tree_util.tree_map(lambda x: jnp.array(x, x.dtype), best_params)
     vs.parameters = best_params
 
     # Compute RDMs

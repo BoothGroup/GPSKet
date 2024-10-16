@@ -111,7 +111,7 @@ def main(argv):
     if config.optimizer_name == 'kernelSR':
         vmc = VMC_SRt(ha, op, variational_state=vs, jacobian_mode=config.optimizer.mode, diag_shift=config.optimizer.diag_shift)
     else:
-        pars_struct = jax.tree_map(
+        pars_struct = jax.tree_util.tree_map(
             lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), vs.parameters
         )
         sr = qk.optimizer.SRRMSProp(
@@ -255,7 +255,7 @@ def main(argv):
         best = restore_best_params(workdir)
         if best is not None:
             best_params = best["Parameters"]
-            best_params = jax.tree_map(lambda x: jnp.array(x, x.dtype), best_params)
+            best_params = jax.tree_util.tree_map(lambda x: jnp.array(x, x.dtype), best_params)
             vs.parameters = best_params
 
         # Update variational state settings
