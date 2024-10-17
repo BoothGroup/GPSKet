@@ -4,7 +4,7 @@ from jax.tree_util import tree_map
 from typing import Callable, Optional
 from netket.utils.numbers import is_scalar
 from netket.utils.types import PyTree, Scalar, ScalarOrSchedule
-from netket.utils import struct
+from netket.utils import struct, warn_deprecation
 from netket.vqs import VariationalState
 from netket.optimizer.preconditioner import AbstractLinearPreconditioner
 from .qgt import QGTJacobianDenseRMSProp
@@ -38,6 +38,11 @@ class SRRMSProp(AbstractLinearPreconditioner, mutable=True):
         self.decay = decay
         self.eps = eps
         super().__init__(solver)
+
+        warn_deprecation(
+            "The SRRMSProp class is not supported anymore and may lead to wrong results."
+            "It is deprecated in favor of the standalone `VMC_SRRMSProp` driver and will be removed in a future release."
+        )
 
         self._ema = tree_map(
             lambda p: jnp.full(p.shape, initial_scale, p.dtype), params_structure
