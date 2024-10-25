@@ -5,7 +5,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import netket as nk
-import GPSKet as qk
 from absl import app
 from absl import flags
 from absl import logging
@@ -15,6 +14,7 @@ from netket.vqs import MCState
 from netket.optimizer import Sgd
 from netket.driver import VMC
 from netket.experimental.driver import VMC_SRt
+from GPSKet.driver import VMC_SRRMSProp
 from GPSKet.sampler import MetropolisHopping
 from cpd_backflow.configs.common import resolve
 from cpd_backflow.systems import get_system
@@ -43,8 +43,6 @@ def serialize_VMC(driver: VMC):
         "optimizer": serialization.to_state_dict(driver._optimizer_state),
         "step": driver._step_count,
     }
-    if hasattr(driver, "preconditioner") and type(driver.preconditioner).__name__ == "SRRMSProp":
-        state_dict["preconditioner"] = serialization.to_state_dict(driver.preconditioner._ema)
     return state_dict
 
 
@@ -61,10 +59,25 @@ def deserialize_VMC(driver: VMC, state_dict: dict):
     new_driver._step_count = serialization.from_state_dict(
         driver._step_count, state_dict["step"]
     )
-    if hasattr(driver, "preconditioner") and type(driver.preconditioner).__name__ == "SRRMSProp":
-        new_driver.preconditioner._ema = serialization.from_state_dict(
-            driver.preconditioner._ema, state_dict["preconditioner"]
-        )
+    return new_driver
+
+def serialize_VMC_SRRMSProp(driver: VMC_SRRMSProp):
+    state_dict = {
+        "variables": serialization.to_state_dict(driver.state.variables),
+        "optimizer": serialization.to_state_dict(driver._optimizer_state),
+        "ema": serialization.to_state_dict(driver.preconditioner._ema),
+        "step": driver._step_count
+    }
+    return state_dict
+
+def deserialize_VMC_SRRMSProp(driver: VMC_SRRMSProp, state_dict: dict):
+    import copy
+
+    new_driver = copy.copy(driver)
+    new_driver.state.variables = serialization.from_state_dict(driver.state.variables, state_dict["variables"])
+    new_driver._optimizer_state = serialization.from_state_dict(driver._optimizer_state, state_dict["optimizer"])
+    new_driver._step_count = serialization.from_state_dict(driver._step_count, state_dict["step"])
+    new_driver._ema = serialization.from_state_dict(driver._ema, state_dict["ema"])
     return new_driver
 
 serialization.register_serialization_state(
@@ -73,6 +86,12 @@ serialization.register_serialization_state(
 
 serialization.register_serialization_state(
     VMC_SRt, serialize_VMC, deserialize_VMC
+)
+
+serialization.register_serialization_state(
+    VMC_SRRMSProp,
+    serialize_VMC,
+    deserialize_VMC
 )
 
 
@@ -110,20 +129,11 @@ def main(argv):
     op = Sgd(learning_rate=config.optimizer.learning_rate)
     if config.optimizer_name == 'kernelSR':
         vmc = VMC_SRt(ha, op, variational_state=vs, jacobian_mode=config.optimizer.mode, diag_shift=config.optimizer.diag_shift)
+    elif config.optimizer_name == 'SRRMSProp':
+        vmc = VMC_SRRMSProp(ha, op, variational_state=vs, diag_shift=config.optimizer.diag_shift, decay=config.optimizer.decay, eps=config.optimizer.eps, jacobian_mode=config.optimizer.mode)
     else:
-        pars_struct = jax.tree_util.tree_map(
-            lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), vs.parameters
-        )
-        sr = qk.optimizer.SRRMSProp(
-            pars_struct,
-            qk.optimizer.qgt.QGTJacobianDenseRMSProp,
-            solver=jax.scipy.sparse.linalg.cg,
-            diag_shift=config.optimizer.diag_shift,
-            decay=config.optimizer.decay,
-            eps=config.optimizer.eps,
-            mode=config.optimizer.mode,
-        )
-        vmc = VMC(ha, op, variational_state=vs, preconditioner=sr)
+        sr = nk.optimizer.SR(nk.optimizer.qgt.QGTJacobianDense, diag_shift=config.optimizer.diag_shift, mode=config.optimizer.mode)
+        vmc = nk.driver.VMC(ha, op, variational_state=vs, preconditioner=sr)
 
     # Restore checkpoint
     checkpoints_dir = os.path.join(workdir, "checkpoints")
