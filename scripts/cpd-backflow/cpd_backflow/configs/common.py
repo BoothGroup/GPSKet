@@ -1,6 +1,5 @@
 import numpy as np
 from ml_collections import ConfigDict
-from ml_collections.config_dict import placeholder
 from netket.utils.mpi import (
     MPI_py_comm as _MPI_comm,
     node_number as _rank,
