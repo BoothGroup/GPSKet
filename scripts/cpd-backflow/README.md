@@ -9,11 +9,17 @@ The code is structured as follows:
 - [utils.py](cpd_backflow/utils.py): small collection of utility functions
 - [rdms.py](cpd_backflow/rdms.py): script to evaluate the RDMs of a molecular system from an optimized model, which are for example used to compute correlation functions
 - [corrfunc.py](cpd_backflow/corrfunc.py): functions used to compute the spin-spin correlations of the 6x6 hydrogen sheet
+- [plots](plots/): contains all the plotting scripts needed to reproduce the figures in the manuscript
 
 The configuration files are:
 - [fermi_hubbard.py](cpd_backflow/configs/fermi_hubbard.py): 2D Fermi-Hubbard system
 - [h2o.py](cpd_backflow/configs/h2o.py): ab-initio Hamiltonian in second quantization for the water molecule in the 6-31g basis
 - [hsheet.py](cpd_backflow/configs/hsheet.py): ab-initio Hamiltonian in second quantization for molecular hydrogen sheet
+
+## Data
+
+The numerical source data presented in the manuscript can be downloaded from the corresponding [figshare](https://kcl.figshare.com/account/home#/projects/238547) project.
+Place this data in the `plots` folder to reproduce the figures in the manuscript.
 
 ## Installation
 
