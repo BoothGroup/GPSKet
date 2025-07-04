@@ -26,7 +26,7 @@ def apply_hopping(
 
                 if cummulative_count is None:
                     parity_count = np.sum(
-                        (x_prime[left_limit:right_limit] & spin_int).astype(np.bool8)
+                        (x_prime[left_limit:right_limit] & spin_int).astype(np.bool)
                     )
                 else:
                     parity_count = (

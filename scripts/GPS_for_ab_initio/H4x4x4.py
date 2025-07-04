@@ -184,8 +184,8 @@ def get_conn_1RDM(x):
     x_prime = np.empty((x.shape[0], 2, norb, norb, x.shape[1]), dtype=np.uint8)
     mels = np.empty((x.shape[0], 2, norb, norb), dtype=np.complex128)
     for batch_id in range(x.shape[0]):
-        is_occ_up = (x[batch_id] & 1).astype(np.bool8)
-        is_occ_down = (x[batch_id] & 2).astype(np.bool8)
+        is_occ_up = (x[batch_id] & 1).astype(np.bool)
+        is_occ_down = (x[batch_id] & 2).astype(np.bool)
         up_count = np.cumsum(is_occ_up)
         down_count = np.cumsum(is_occ_down)
         for i in range(norb):

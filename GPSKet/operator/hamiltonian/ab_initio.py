@@ -56,8 +56,8 @@ class AbInitioHamiltonian(FermionicDiscreteOperator):
 
         c = 0
         for batch_id in range(x.shape[0]):
-            is_occ_up = (x[batch_id] & 1).astype(np.bool8)
-            is_occ_down = (x[batch_id] & 2).astype(np.bool8)
+            is_occ_up = (x[batch_id] & 1).astype(np.bool)
+            is_occ_down = (x[batch_id] & 2).astype(np.bool)
 
             up_count = np.cumsum(is_occ_up)
             down_count = np.cumsum(is_occ_down)
