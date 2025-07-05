@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 from typing import Optional, Tuple
-from netket.hilbert.custom_hilbert import HomogeneousHilbert
+from netket.hilbert import HomogeneousHilbert
 from netket.hilbert.constraint import DiscreteHilbertConstraint
 from netket.utils import struct, StaticRange
 from netket.utils.types import Scalar, Array
