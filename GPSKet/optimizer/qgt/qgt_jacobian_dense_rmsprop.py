@@ -4,7 +4,6 @@ import netket.jax as nkjax
 from flax import struct
 from typing import Optional, Union
 from netket.utils import mpi
-from netket.nn import split_array_mpi
 from netket.utils.types import PyTree, Scalar
 from netket.optimizer import LinearOperator
 from netket.optimizer.linear_operator import Uninitialized
@@ -45,8 +44,8 @@ def QGTJacobianDenseRMSProp(
     from netket.vqs import FullSumState
 
     if isinstance(vstate, FullSumState):
-        samples = split_array_mpi(vstate._all_states)
-        pdf = split_array_mpi(vstate.probability_distribution())
+        samples = vstate._all_states
+        pdf = vstate.probability_distribution()
     elif isinstance(vstate, MCStateUniqueSamples):
         samples, pdf = vstate.samples_with_counts
     else:

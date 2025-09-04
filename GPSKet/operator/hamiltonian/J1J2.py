@@ -10,7 +10,7 @@ from typing import Optional
 
 
 # dummy class used if the local energy should be evaluated on the fly (allowing for fast updating)
-class HeisenbergOnTheFly(nk.operator.Heisenberg):
+class HeisenbergOnTheFly(nk.operator.LocalOperator):
     pass
 
 
