@@ -167,19 +167,15 @@ def local_en_on_the_fly(
 
                     return parity_multiplicator * amp_ratio.astype(jnp.complex_)
 
-                def no_hop(operands):
-                    return 0.0 * 1j
-
                 start_occ = sample[annihilate_site]
                 end_occ = sample[create_site]
-                multiplicator = jax.lax.cond(
+                multiplicator = jnp.where(
                     jnp.logical_or(
                         ~(start_occ & spin_int).astype(bool),
                         (end_occ & spin_int).astype(bool),
                     ),
-                    no_hop,
-                    hop,
-                    (annihilate_site, create_site),
+                    0.0,
+                    hop((annihilate_site, create_site)),
                 )
                 return multiplicator
 
