@@ -179,14 +179,13 @@ def local_en_on_the_fly(
                 )
                 return multiplicator
 
-            def hopping_loop(index):
-                edge = edges[index, :]
+            def hopping_loop(edge, t):
                 value = apply_hopping(edge[0], edge[1])
                 value += apply_hopping(edge[1], edge[0])
-                value *= -t[index]
+                value *= -t
                 return value
 
-            return jnp.sum(jax.vmap(hopping_loop)(jnp.arange(edges.shape[0])))
+            return jnp.sum(jax.vmap(hopping_loop)(edges, t))
 
         if edges.shape[0] > 0:
             local_en += get_hopping_term(1, up_count)
